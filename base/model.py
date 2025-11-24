@@ -258,10 +258,12 @@ class DataRunner:
         self,
         data: UnitData,
         Data: type[InerialNetworkData] = InerialNetworkData,
+        *,
         rerun_init: bool = True,
+        using_gt: bool = True,
     ):
         self.data = data
-        world_imu_gt = data.imu_data.transform(data.gt_data.rots)
+        world_imu_gt = data.imu_data.transform(data.gt_data.rots if using_gt else None)
         self.in_data = Data(world_imu_gt)
 
         rre.rerun_init(data.name, imu_view_tags=["GT", "Raw"])
