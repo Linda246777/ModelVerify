@@ -29,17 +29,11 @@ def log_coordinate(
     )
 
 
-RerunInitState = False
-
-
 def rerun_init(
     name: str,
     imu_view_tags: list = [""],
     imu_view_range: tuple[float, float] = (-15.0, 15.0),
 ):
-    global RerunInitState
-    if RerunInitState:
-        return
     XYZ_AXIS_NAMES = ["x", "y", "z"]
     XYZ_AXIS_COLORS = [[(231, 76, 60), (39, 174, 96), (52, 120, 219)]]
 
@@ -98,13 +92,12 @@ def rerun_init(
     )
     rr.send_blueprint(blueprint)
     rr.log("/", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
-    RerunInitState = True
 
 
 def set_world_tf(tf: Pose):
     rr.log(
         "/world",
-        rr.Transform3D(mat3x3=tf.rot.as_matrix(), translation=tf.trans),
+        rr.Transform3D(mat3x3=tf.rot.as_matrix(), translation=tf.p),
         static=True,
     )
 
@@ -132,7 +125,7 @@ def send_pose_data(poses_data: PosesData):
         "/world/groundtruth",
         length=1,
         labels=["Groundtruth"],
-        show_labels=True,
+        show_labels=False,
     )
     rr.send_columns(
         "/world/groundtruth",
@@ -142,19 +135,25 @@ def send_pose_data(poses_data: PosesData):
 
     rr.log(
         "/world/groundtruth_path",
-        rr.LineStrips3D(strips=[ps], labels=["Groundtruth"], colors=[[192, 72, 72]]),
+        rr.LineStrips3D(
+            strips=[ps],
+            labels=["Groundtruth"],
+            colors=[[192, 72, 72]],
+        ),
         static=True,
     )
 
 
-def log_network_pose(t_s: float, pose: Pose, path: list[NDArray] | None = None):
-    rr.set_time("timestamp", timestamp=t_s)
+def log_network_pose(
+    t_us: int, pose: Pose, path: list[NDArray] | None = None, suffix: str = ""
+):
+    rr.set_time("timestamp", timestamp=t_us / 1e6)
     rr.log(
-        "/world/network",
-        rr.Transform3D(mat3x3=pose.rot.as_matrix(), translation=pose.trans),
+        f"/world/network{suffix}",
+        rr.Transform3D(mat3x3=pose.rot.as_matrix(), translation=pose.p),
     )
     if path is not None:
         rr.log(
-            "/world/network_path",
-            rr.LineStrips3D(strips=[path], labels=["Network"], colors=[[72, 192, 72]]),
+            f"/world/network{suffix}_path",
+            rr.LineStrips3D(strips=[path], labels=[f"Network{suffix}"]),
         )

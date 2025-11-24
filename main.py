@@ -1,39 +1,45 @@
-# from base.device import DefaultDevice
 import base.rerun_ext as rre
-from base.datatype import UnitData
-from base.model import InerialNetworkData, ModelLoader
+from base.args_parser import DatasetArgsParser
+from base.datatype import DeviceDataset, UnitData
+from base.model import DataRunner, InerialNetwork, InerialNetworkData, ModelLoader
+from TLIOView import TLIOData
+
+
+def tlio_view(path: str, net: InerialNetwork):
+    path = (
+        "/Users/qi/Codespace/Python/SpaceAlignment/dataset/1/20251031_101025_SM-G9900"
+    )
+    td = TLIOData(path)
+    rre.rerun_init("IMU_GT", imu_view_tags=["GT"])
+    rre.send_pose_data(td.gt_data)
+    rre.send_imu_data(td.imu_data, tag="GT")
+    in_data = InerialNetworkData(td.imu_data)
+    in_data.predict_using(net)
 
 
 def main():
-    path = "/Users/qi/Resources/Models"
-    data_path = "/Users/qi/Resources/Dataset/Compress001/001/2025_ABR-AL60_in/20251105_144535_ABR-AL60"
-    # data_path = "/Users/qi/Codespace/Python/SpaceAlignment/dataset/001/20251031_01_in/Calibration/20251031_095725_SM-G9900"
+    args = DatasetArgsParser()
+    args.parse()
 
-    loader = ModelLoader(path)
-    net0 = loader[0]
+    models_path = "/Users/qi/Resources/Models"
+    loader = ModelLoader(models_path)
 
-    data = UnitData(data_path)
-    world_imu_gt = data.imu_data.transform(data.gt_data.rots)
-    world_imu_ahrs = data.imu_data.transform()
+    if args.unit:
+        # 数据
+        data = UnitData(args.unit)
+        Data = InerialNetworkData.set_step(10)
+        runner = DataRunner(data, Data)
+        # runner.predict(loader.get_by_name("StarIO"))
+        # runner.predict_batch(loader)
+        # runner.predict(loader.get_by_name("model_huawei"))
+        runner.predict_batch(loader.get_by_names(["model_huawei", "ZZH"]))
 
-    # Rerun View
-    rre.rerun_init("IMU_GT", imu_view_tags=["AHRS", "GT", "Raw"])
-    rre.set_world_tf(data.calib_data.tf_sg_global)
-    rre.send_pose_data(data.gt_data)
-    rre.send_imu_data(world_imu_ahrs, tag="AHRS")
-    rre.send_imu_data(world_imu_gt, tag="GT")
-    rre.send_imu_data(data.imu_data, tag="Raw")
-
-    in_data_gt = InerialNetworkData(world_imu_gt)
-    res0 = in_data_gt.predict_using(net0)
-
-
-    res0.to_poses()
-
-    exit()
-
-    # Model Predict
-    loader.models
+    if args.dataset:
+        dataset_path = args.dataset
+        datas = DeviceDataset(dataset_path)
+        for data in datas:
+            runner = DataRunner(data, InerialNetworkData.set_step(10))
+            runner.predict(loader.get_by_name("model_huawei"))
 
 
 if __name__ == "__main__":
