@@ -31,6 +31,7 @@ def log_coordinate(
 
 def rerun_init(
     name: str,
+    imu_view_visible: bool = False,
     imu_view_tags: list = [""],
     imu_view_range: tuple[float, float] = (-15.0, 15.0),
 ):
@@ -79,7 +80,7 @@ def rerun_init(
 
     rr.init(name, spawn=True)
     blueprint = rrb.Horizontal(
-        rrb.Vertical(*imu_views),
+        rrb.Vertical(*imu_views, visible=imu_view_visible),
         rrb.Spatial3DView(
             origin="/",
             name="World position",

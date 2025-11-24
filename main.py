@@ -1,20 +1,6 @@
-import base.rerun_ext as rre
 from base.args_parser import DatasetArgsParser
 from base.datatype import DeviceDataset, UnitData
-from base.model import DataRunner, InerialNetwork, InerialNetworkData, ModelLoader
-from TLIOView import TLIOData
-
-
-def tlio_view(path: str, net: InerialNetwork):
-    path = (
-        "/Users/qi/Codespace/Python/SpaceAlignment/dataset/1/20251031_101025_SM-G9900"
-    )
-    td = TLIOData(path)
-    rre.rerun_init("IMU_GT", imu_view_tags=["GT"])
-    rre.send_pose_data(td.gt_data)
-    rre.send_imu_data(td.imu_data, tag="GT")
-    in_data = InerialNetworkData(td.imu_data)
-    in_data.predict_using(net)
+from base.model import DataRunner, InerialNetworkData, ModelLoader
 
 
 def main():
