@@ -7,7 +7,7 @@ from scipy.spatial.transform import Rotation
 import base.rerun_ext as rre
 from base.args_parser import DatasetArgsParser
 from base.datatype import ImuData, PosesData
-from base.model import InerialNetwork, InerialNetworkData, ModelLoader
+from base.model import InertialNetwork, InertialNetworkData, ModelLoader
 
 
 class TLIOData:
@@ -34,13 +34,13 @@ class TLIOData:
         self.vs = vs
 
 
-def tlio_view(path: str | Path, net: InerialNetwork):
+def tlio_view(path: str | Path, net: InertialNetwork):
     td = TLIOData(path)
     rre.rerun_init(td.name, imu_view_tags=["GT"])
     rre.send_pose_data(td.gt_data)
     rre.send_imu_data(td.imu_data, tag="GT")
 
-    in_data = InerialNetworkData(td.imu_data)
+    in_data = InertialNetworkData(td.imu_data)
     in_data.predict_using(net)
 
 

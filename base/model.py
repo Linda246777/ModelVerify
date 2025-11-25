@@ -14,7 +14,7 @@ from .device import DefaultDevice
 NetworkOutput: TypeAlias = tuple[NDArray, NDArray]
 
 
-class InerialNetwork:
+class InertialNetwork:
     model: torch.nn.Module
 
     def __init__(
@@ -56,12 +56,12 @@ class ModelLoader:
 
     def __iter__(self):
         for model_path in self.models:
-            yield InerialNetwork(model_path)
+            yield InertialNetwork(model_path)
 
     def __getitem__(self, index: int | slice):
         if isinstance(index, slice):
-            return [InerialNetwork(model_path) for model_path in self.models[index]]
-        return InerialNetwork(self.models[index])
+            return [InertialNetwork(model_path) for model_path in self.models[index]]
+        return InertialNetwork(self.models[index])
 
     def __len__(self):
         return self.models.__len__()
@@ -72,11 +72,11 @@ class ModelLoader:
     def get_by_name(self, name: str):
         for model_path in self.models:
             if model_path.name.startswith(name):
-                return InerialNetwork(model_path)
+                return InertialNetwork(model_path)
         raise ValueError(f"Model {name} not found.")
 
     def get_networks(self):
-        return [InerialNetwork(model_path) for model_path in self.models]
+        return [InertialNetwork(model_path) for model_path in self.models]
 
 
 class NetworkResult:
@@ -173,7 +173,7 @@ class NetworkResult:
         )
 
 
-class InerialNetworkData:
+class InertialNetworkData:
     step = 80
     rate = 200
     start_idx: int = 0
@@ -226,7 +226,7 @@ class InerialNetworkData:
             yield self.imu_block[self.bc : self.bc + self.rate].T.reshape(self.shape)
             self.bc += self.step
 
-    def predict_using(self, net: InerialNetwork):
+    def predict_using(self, net: InertialNetwork):
         t_start_us = self.world_imu_data.t_us[0]
         results = NetworkResult(
             net.name, step=self.step, rate=self.rate, t_start_us=t_start_us
@@ -236,7 +236,7 @@ class InerialNetworkData:
             print(f"{net.name} {self.bc:06d}: {_pose.p}")
         return results
 
-    def predict_usings(self, networks: list[InerialNetwork]):
+    def predict_usings(self, networks: list[InertialNetwork]):
         t_start_us = self.world_imu_data.t_us[0]
 
         results = [
@@ -257,7 +257,7 @@ class DataRunner:
     def __init__(
         self,
         data: UnitData,
-        Data: type[InerialNetworkData] = InerialNetworkData,
+        Data: type[InertialNetworkData] = InertialNetworkData,
         *,
         rerun_init: bool = True,
         using_gt: bool = True,
@@ -271,12 +271,12 @@ class DataRunner:
         rre.send_imu_data(data.imu_data, tag="Raw")
         rre.send_imu_data(world_imu_gt, tag="GT")
 
-    def predict(self, net: InerialNetwork):
+    def predict(self, net: InertialNetwork):
         print("> Using Model:", net.name)
         results = self.in_data.predict_using(net)
         results.to_csv(f"results/{self.data.name}/{net.name}.csv")
 
         print(f"> Model {net.name} prediction completed.")
 
-    def predict_batch(self, networks: list[InerialNetwork]):
+    def predict_batch(self, networks: list[InertialNetwork]):
         self.in_data.predict_usings(networks)

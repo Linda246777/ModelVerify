@@ -1,6 +1,6 @@
 from base.args_parser import DatasetArgsParser
 from base.datatype import DeviceDataset, UnitData
-from base.model import DataRunner, InerialNetworkData, ModelLoader
+from base.model import DataRunner, InertialNetworkData, ModelLoader
 
 
 def main():
@@ -25,7 +25,7 @@ def main():
     if args.unit:
         # 数据
         data = UnitData(args.unit)
-        Data = InerialNetworkData.set_step(20)
+        Data = InertialNetworkData.set_step(20)
         runner = DataRunner(data, Data, using_gt=not args.args.using_ahrs)
         runner.predict_batch(loader.get_by_names(models))
 
@@ -33,7 +33,7 @@ def main():
         dataset_path = args.dataset
         datas = DeviceDataset(dataset_path)
         for data in datas:
-            runner = DataRunner(data, InerialNetworkData.set_step(10))
+            runner = DataRunner(data, InertialNetworkData.set_step(10))
             runner.predict_batch(loader.get_by_names(models))
 
 

@@ -119,7 +119,7 @@ def send_imu_data(imu_data: ImuData, tag: str = ""):
 
 def send_pose_data(poses_data: PosesData):
     times = rr.TimeColumn("timestamp", timestamp=poses_data.t_us * 1e-6)
-    ps = poses_data.trans
+    ps = poses_data.trans - poses_data.trans[0]
     qs = poses_data.rots.as_quat(canonical=True)
 
     log_coordinate(
