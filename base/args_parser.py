@@ -27,7 +27,9 @@ class DatasetArgsParser:
         self.parser.add_argument("-o", "--output", type=str, help="输出路径")
         self.parser.add_argument("-r", "--regen", action="store_true", help="重新生成")
         self.parser.add_argument("-v", "--visual", action="store_true", help="可视化")
-        self.parser.add_argument("-t", "--time_range", type=float, nargs=2)
+        self.parser.add_argument(
+            "-t", "--time_range", type=float, default=(None, None), nargs=2
+        )
 
     def parse(self):
         self.parser.parse_args()

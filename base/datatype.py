@@ -71,7 +71,7 @@ class ImuData:
 
     @staticmethod
     def from_raw(raw: NDArray):
-        assert raw.shape[1] == 12, f"Invalid raw data shape: {raw.shape}"
+        assert raw.shape[1] >= 12, f"Invalid raw data shape: {raw.shape}"
         gyro = raw[:, 1:4]
         acce = raw[:, 4:7]
         ahrs = Rotation.from_quat(raw[:, 7:11], scalar_first=True)
