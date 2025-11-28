@@ -117,44 +117,36 @@ def send_imu_data(imu_data: ImuData, tag: str = ""):
     )
 
 
-def send_pose_data(poses_data: PosesData):
+def send_pose_data(poses_data: PosesData, tag: str = "Pose", color=None):
     times = rr.TimeColumn("timestamp", timestamp=poses_data.t_us * 1e-6)
     ps = poses_data.trans - poses_data.trans[0]
     qs = poses_data.rots.as_quat(canonical=True)
 
-    log_coordinate(
-        "/world/groundtruth",
-        length=1,
-        labels=["Groundtruth"],
-        show_labels=False,
-    )
+    log_coordinate(f"/world/{tag}", length=1, labels=[tag], show_labels=False)
     rr.send_columns(
-        "/world/groundtruth",
+        f"/world/{tag}",
         indexes=[times],
         columns=rr.Transform3D.columns(quaternion=qs, translation=ps),
     )
 
+    colors = [color] if color is not None else None
     rr.log(
-        "/world/groundtruth_path",
-        rr.LineStrips3D(
-            strips=[ps],
-            labels=["Groundtruth"],
-            colors=[[192, 72, 72]],
-        ),
+        f"/world/{tag}_path",
+        rr.LineStrips3D(strips=[ps], labels=[tag], colors=colors),
         static=True,
     )
 
 
 def log_network_pose(
-    t_us: int, pose: Pose, path: list[NDArray] | None = None, suffix: str = ""
+    t_us: int, pose: Pose, path: list[NDArray] | None = None, tag: str = ""
 ):
     rr.set_time("timestamp", timestamp=t_us / 1e6)
     rr.log(
-        f"/world/network{suffix}",
+        f"/world/{tag}",
         rr.Transform3D(mat3x3=pose.rot.as_matrix(), translation=pose.p),
     )
     if path is not None:
         rr.log(
-            f"/world/network{suffix}_path",
-            rr.LineStrips3D(strips=[path], labels=[f"Network{suffix}"]),
+            f"/world/{tag}_path",
+            rr.LineStrips3D(strips=[path], labels=[f"{tag}"]),
         )

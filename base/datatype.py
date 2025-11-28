@@ -44,6 +44,10 @@ class Pose:
     def inverse(self):
         return Pose(self.rot.inv(), -self.rot.inv().apply(self.p))
 
+    def get_yaw_pose(self):
+        yaw = self.rot.as_euler("ZXY")[0]
+        return Pose(Rotation.from_euler("ZXY", [yaw, 0, 0]), np.zeros(3))
+
 
 Frame: TypeAlias = Literal["local", "global"]
 
@@ -99,6 +103,12 @@ class PosesData:
     rots: Rotation
     trans: NDArray
 
+    def __getitem__(self, index):
+        if isinstance(index, int):
+            return Pose(self.rots[index], self.trans[index])
+        else:
+            raise TypeError(f"Unsupported index type: {type(index)}")
+
     def interpolate(self, t_new_us: NDArray):
         rots = slerp_rotation(self.rots, self.t_us, t_new_us)
         trans = interpolate_vector3(self.trans, self.t_us, t_new_us)
@@ -138,6 +148,23 @@ def get_ang_vec(rot: Rotation):
     angle = np.linalg.norm(rot_vec)
     vec = rot_vec / angle
     return vec.tolist(), float(angle) * 180 / np.pi
+
+
+class FusionData(PosesData):
+    @staticmethod
+    def from_raw(raw: NDArray):
+        t_us = raw[:, 0]
+        trans = raw[:, 1:4]
+        quats = raw[:, 4:8]
+        # cam_trans = raw[:, 8:11]
+        # cam_quats = raw[:, 11:15]
+        rots = Rotation.from_quat(quats, scalar_first=True)
+        return FusionData(t_us, rots, trans)
+
+    @staticmethod
+    def from_csv(path: Path):
+        raw = pd.read_csv(path).to_numpy()
+        return FusionData.from_raw(raw)
 
 
 @dataclass
@@ -193,6 +220,11 @@ class UnitData:
 
         self._imu_path = base_dir / "imu.csv"
         self._gt_path = base_dir / "rtab.csv"
+        if not self._gt_path.exists():
+            self._gt_path = base_dir / "gt.csv"
+        self._fusion_path = base_dir / "fusion.csv"
+        self.has_fusion = self._fusion_path.exists()
+
         # 读取标定数据
         self._calib_file = base_dir / "Calibration.json"
         self._check_file = base_dir / "DataCheck.json"
@@ -205,14 +237,17 @@ class UnitData:
     def load_data(self):
         imu_data = ImuData.from_csv(self._imu_path)
         gt_data = GroundTruthData.from_csv(self._gt_path)
+        if self.has_fusion:
+            fusion_data = FusionData.from_csv(self._fusion_path)
+            self.fusion_data = fusion_data
 
         # 时间修正
         gt_data.t_us += self.check_data.t_gi_us
 
         # 空间变换
         gt_data.transform_local(self.calib_data.tf_sg_local.inverse())
-        # gt_data.transform_global(self.calib_data.tf_sg_global.inverse())
-        gt_data.trans -= gt_data.trans[0]
+        # gt_data.transform_global(self.calib_data.tf_sg_global)
+        gt_data.transform_global(gt_data[0].get_yaw_pose().inverse())
 
         # 数据对齐
         t_new_us = get_time_series([imu_data.t_us, gt_data.t_us])

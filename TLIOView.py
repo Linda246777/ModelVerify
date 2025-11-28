@@ -31,13 +31,13 @@ class TLIOData:
 
         self.imu_data = ImuData(t_us, gyro, acce, rots, "global")
         self.gt_data = PosesData(t_us, rots, ps)
-        self.vs = vs
+        self.velocities = vs
 
 
 def tlio_view(path: str | Path, net: InertialNetwork):
     td = TLIOData(path)
     rre.rerun_init(td.name, imu_view_tags=["GT"])
-    rre.send_pose_data(td.gt_data)
+    rre.send_pose_data(td.gt_data, "GT")
     rre.send_imu_data(td.imu_data, tag="GT")
 
     in_data = InertialNetworkData(td.imu_data)
@@ -49,7 +49,7 @@ if __name__ == "__main__":
     models_path = "/Users/qi/Resources/Models"
     loader = ModelLoader(models_path)
 
-    net = loader.get_by_name("ZLX_03")
+    net = loader.get_by_name("model_mi_hw_1126")
     if args.unit is not None:
         tlio_view(args.unit, net)
     elif args.dataset is not None:

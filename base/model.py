@@ -71,6 +71,8 @@ class ModelLoader:
 
     def get_by_name(self, name: str):
         for model_path in self.models:
+            if model_path.is_dir():
+                continue
             if model_path.name.startswith(name):
                 return InertialNetwork(model_path)
         raise ValueError(f"Model {name} not found.")
@@ -137,9 +139,7 @@ class NetworkResult:
         self.t_us.append(self.interval_us + self.t_us[-1])
 
         if self.using_rerun:
-            rre.log_network_pose(
-                self.t_us[-1], self.pose, self.path, suffix=self.suffix
-            )
+            rre.log_network_pose(self.t_us[-1], self.pose, self.path, tag=self.suffix)
 
         return self.pose
 
@@ -267,9 +267,11 @@ class DataRunner:
         self.in_data = Data(world_imu_gt)
 
         rre.rerun_init(data.name, imu_view_tags=["GT", "Raw"])
-        rre.send_pose_data(data.gt_data)
+        rre.send_pose_data(data.gt_data, "GT", color=[192, 72, 72])
         rre.send_imu_data(data.imu_data, tag="Raw")
         rre.send_imu_data(world_imu_gt, tag="GT")
+        if self.data.has_fusion:
+            rre.send_pose_data(data.fusion_data, "Fusion")
 
     def predict(self, net: InertialNetwork):
         print("> Using Model:", net.name)

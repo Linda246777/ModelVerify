@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from base.args_parser import DatasetArgsParser
 from base.datatype import DeviceDataset, UnitData
 from base.model import DataRunner, InertialNetworkData, ModelLoader
@@ -5,21 +6,18 @@ from base.model import DataRunner, InertialNetworkData, ModelLoader
 
 def main():
     args = DatasetArgsParser()
-    args.parser.add_argument(
-        "-m",
-        "--models",
-        dest="models",
-        nargs="+",
-        required=True,
-        help="使用的模型",
-    )
+    args.parser.add_argument("-m", "--models", nargs="+", help="模型")
+    args.parser.add_argument("--models_path", type=str, help="模型文件夹")
     args.parser.add_argument("--using_ahrs", action="store_true", default=False)
     args.parse()
 
     models = args.args.models
-    assert len(models) != 0, "model name is empty"
+    if models is None or len(models) == 0:
+        models = ["model_mi_hw_1128"]
 
     models_path = "/Users/qi/Resources/Models"
+    if args.args.models_path is not None:
+        models_path = args.args.models_path
     loader = ModelLoader(models_path)
 
     if args.unit:
