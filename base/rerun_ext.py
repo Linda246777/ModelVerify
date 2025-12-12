@@ -76,7 +76,24 @@ def rerun_init(
         for tag in imu_view_tags
     ]
 
-    imu_views = gyro_views + acce_views
+    magn_views = [
+        rrb.TimeSeriesView(
+            origin=f"magnetometer_{tag}",
+            name=f"Magnetometer_{tag}",
+            overrides={
+                # type: ignore[arg-type]
+                f"/magnetometer_{tag}": rr.SeriesLines.from_fields(
+                    names=XYZ_AXIS_NAMES, colors=XYZ_AXIS_COLORS
+                ),
+            },
+            axis_x=rrb.archetypes.TimeAxis(
+                view_range=rrb.TimeRange(start=time_range_start, end=time_range_end)
+            ),
+        )
+        for tag in imu_view_tags
+    ]
+
+    imu_views = gyro_views + acce_views + magn_views
 
     rr.init(name, spawn=True)
     blueprint = rrb.Horizontal(
@@ -114,6 +131,11 @@ def send_imu_data(imu_data: ImuData, tag: str = ""):
         f"/accelerometer_{tag}",
         indexes=[ts_imu],
         columns=rr.Scalars.columns(scalars=imu_data.acce),
+    )
+    rr.send_columns(
+        f"/magnetometer_{tag}",
+        indexes=[ts_imu],
+        columns=rr.Scalars.columns(scalars=imu_data.magn),
     )
 
 

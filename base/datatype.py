@@ -58,12 +58,18 @@ class ImuData:
     gyro: NDArray
     acce: NDArray
     ahrs: Rotation
+    magn: NDArray
 
     frame: Frame = "local"
 
     def __getitem__(self, idx):
         return ImuData(
-            self.t_us[idx], self.gyro[idx], self.acce[idx], self.ahrs[idx], self.frame
+            self.t_us[idx],
+            self.gyro[idx],
+            self.acce[idx],
+            self.ahrs[idx],
+            self.magn[idx],
+            self.frame,
         )
 
     def __len__(self):
@@ -76,7 +82,13 @@ class ImuData:
         acce = raw[:, 4:7]
         ahrs = Rotation.from_quat(raw[:, 7:11], scalar_first=True)
         t_us = raw[:, 0] + raw[:, 11][0] + -raw[:, 0][0]
-        return ImuData(t_us, gyro, acce, ahrs)
+
+        if raw.shape[1] >= 15:
+            magn = raw[:, 12:15]
+        else:
+            magn = np.zeros_like(gyro)
+            # raise ValueError("Invalid raw data shape: missing magnetometer data")
+        return ImuData(t_us, gyro, acce, ahrs, magn)
 
     @staticmethod
     def from_csv(path: Path):
@@ -87,14 +99,17 @@ class ImuData:
         acce = interpolate_vector3(self.acce, self.t_us, t_new_us)
         gyro = interpolate_vector3(self.gyro, self.t_us, t_new_us)
         ahrs = slerp_rotation(self.ahrs, self.t_us, t_new_us)
-        return ImuData(t_new_us, gyro, acce, ahrs)
+        # 磁场
+        magn = interpolate_vector3(self.magn, self.t_us, t_new_us)
+        return ImuData(t_new_us, gyro, acce, ahrs, magn)
 
     def transform(self, rots: Rotation | None = None):
         if rots is None:
             rots = self.ahrs
         acce = rots.apply(self.acce)
         gyro = rots.apply(self.gyro)
-        return ImuData(self.t_us, gyro, acce, rots, frame="global")
+        magn = rots.apply(self.magn)
+        return ImuData(self.t_us, gyro, acce, rots, magn, frame="global")
 
     def get_time_range(self, time_range: tuple[float | None, float | None]):
         ts, te = self.t_us[0], self.t_us[-1]
@@ -104,7 +119,12 @@ class ImuData:
             te = time_range[1] * 1e6 + self.t_us[0]
         m = (self.t_us >= ts) & (self.t_us <= te)
         return ImuData(
-            self.t_us[m], self.gyro[m], self.acce[m], self.ahrs[m], frame=self.frame
+            self.t_us[m],
+            self.gyro[m],
+            self.acce[m],
+            self.ahrs[m],
+            self.magn[m],
+            self.frame,
         )
 
 

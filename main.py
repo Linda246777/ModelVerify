@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 from base.args_parser import DatasetArgsParser
 from base.datatype import DeviceDataset, UnitData
 from base.model import DataRunner, InertialNetworkData, ModelLoader
@@ -15,7 +16,7 @@ def main():
     time_range = dap.args.time_range
     models = dap.args.models
     if models is None or len(models) == 0:
-        models = ["model_mi_hw_1128"]
+        models = ["model_mi_hw_1129"]
 
     models_path = "Models"
     if dap.args.models_path is not None:

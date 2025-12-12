@@ -15,3 +15,5 @@ datasets/
 results/
 .DS_Store
 /Models
+
+/*.pt
