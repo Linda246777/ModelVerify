@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 
 import base.rerun_ext as rre
 
-from .datatype import ImuData, Pose, UnitData
+from .datatype import ImuData, Pose, PosesData, UnitData
 from .device import DefaultDevice
 
 NetworkOutput: TypeAlias = tuple[NDArray, NDArray]
@@ -97,7 +97,7 @@ class NetworkResult:
     def __init__(
         self,
         tag: str = "",
-        init_pose: Pose = Pose.identity(),
+        init_positon: NDArray = np.zeros(3),
         *,
         step: int = 10,
         rate: int = 200,
@@ -113,7 +113,7 @@ class NetworkResult:
 
         self.meas_list = []
         self.meas_cov_list = []
-        self.pose = init_pose
+        self.positon = init_positon
         self.pose_list = []
         self.path = []
 
@@ -131,18 +131,21 @@ class NetworkResult:
     def __getitem__(self, index: int):
         return self.meas_list[index], self.meas_cov_list[index]
 
-    def add(self, output: NetworkOutput):
+    def add(self, output: NetworkOutput, ref_pose: Pose = Pose.identity()):
         self.meas_list.append(output[0])
         self.meas_cov_list.append(output[1])
-        self.pose.compose_trans_self(output[0] * self.interval_us / 1e6)
-        self.pose_list.append(self.pose.copy())
-        self.path.append(self.pose_list[-1].p)
-        self.t_us.append(self.interval_us + self.t_us[-1])
+
+        t_us = self.interval_us + self.t_us[-1]
+        disp = output[0] * self.interval_us / 1e6
+        self.positon += disp
+        ref_pose.p = self.positon
+        self.pose_list.append(ref_pose)
+        self.path.append(self.positon.copy())
+        self.t_us.append(t_us)
 
         if self.using_rerun:
-            rre.log_network_pose(self.t_us[-1], self.pose, self.path, tag=self.tag)
-
-        return self.pose
+            rre.log_network_pose(t_us, ref_pose, self.path, tag=self.tag)
+        return ref_pose
 
     def to_csv(self, path: Path | str):
         path = Path(path)
@@ -230,26 +233,33 @@ class InertialNetworkData:
             yield self.imu_block[self.bc : self.bc + self.rate].T.reshape(self.shape)
             self.bc += self.step
 
-    def predict_using(self, net: InertialNetwork, init_pose: Pose = Pose.identity()):
+    def get_block_idx(self):
+        self.bc = 0
+        while self.bc + self.rate < len(self.imu_block):
+            yield (
+                self.bc,
+                self.imu_block[self.bc : self.bc + self.rate].T.reshape(self.shape),
+            )
+            self.bc += self.step
+
+    def predict_using(self, net: InertialNetwork, ref_poses: PosesData):
         result = NetworkResult(
             net.name,
-            init_pose,
+            ref_poses.get_pose(0).p,
             step=self.step,
             rate=self.rate,
             t_start_us=self.world_imu_data.t_us[0],
         )
-        for block in self.get_block():
-            _pose = result.add(net.predict(block))
-            print(f"{net.name} {self.bc:06d}: {_pose.p}")
+        for idx, block in self.get_block_idx():
+            _pose = result.add(net.predict(block), ref_poses.get_pose(idx))
+            print(f"{net.name}-{self.bc}: {_pose.p}")
         return result
 
-    def predict_usings(
-        self, networks: list[InertialNetwork], init_pose: Pose = Pose.identity()
-    ):
+    def predict_usings(self, networks: list[InertialNetwork], ref_poses: PosesData):
         results = [
             NetworkResult(
                 model.name,
-                init_pose,
+                ref_poses.get_pose(0).p,
                 step=self.step,
                 rate=self.rate,
                 t_start_us=self.world_imu_data.t_us[0],
@@ -257,9 +267,9 @@ class InertialNetworkData:
             for model in networks
         ]
 
-        for block in self.get_block():
+        for idx, block in self.get_block_idx():
             for i, net in enumerate(networks):
-                _pose = results[i].add(net.predict(block))
+                _pose = results[i].add(net.predict(block), ref_poses.get_pose(idx))
                 print(f"{net.name}-{self.bc}: {_pose.p}")
 
         return results
@@ -272,37 +282,36 @@ class DataRunner:
         Data: type[InertialNetworkData] = InertialNetworkData,
         *,
         time_range: tuple[float | None, float | None] = (None, None),
-        rerun_init: bool = True,
+        has_init_rerun: bool = False,
         using_gt: bool = True,
     ):
         self.data = ud
-        gt_data = ud.gt_data.get_time_range(time_range)
-        imu_data = ud.imu_data.get_time_range(time_range)
+        self.gt_data = ud.gt_data.get_time_range(time_range)
+        self.imu_data = ud.imu_data.get_time_range(time_range)
 
-        world_imu_gt = imu_data.transform(gt_data.rots if using_gt else None)
+        world_imu_gt = self.imu_data.transform(self.gt_data.rots if using_gt else None)
         self.in_data = Data(world_imu_gt)
 
         # 获取 gt_data 的起始位置
-        assert len(gt_data) > 0, f"{gt_data}"
-        self.init_pose = Pose.from_transform(gt_data[0].p)
+        assert len(self.gt_data) > 0, f"{self.gt_data}"
+        self.init_pose = Pose.from_transform(self.gt_data.ps[0])
 
-        rre.rerun_init(ud.name, imu_view_tags=["GT", "Raw"])
-        rre.send_pose_data(gt_data, "GT", color=[192, 72, 72])
-        rre.send_imu_data(imu_data, tag="Raw")
-        rre.send_imu_data(world_imu_gt, tag="GT")
-        if self.data.has_fusion:
-            fusion_data = ud.fusion_data.get_time_range(time_range)
-            fusion_data.trans = (
-                fusion_data.trans - fusion_data.trans[0] + self.init_pose.p
-            )
-            rre.send_pose_data(fusion_data, "Fusion")
+        if not has_init_rerun:
+            rre.rerun_init(ud.name, imu_view_tags=["GT", "Raw"])
+            rre.send_pose_data(self.gt_data, "GT", color=[192, 72, 72])
+            rre.send_imu_data(self.imu_data, tag="Raw")
+            rre.send_imu_data(world_imu_gt, tag="GT")
+            if self.data.has_fusion:
+                fusion_data = ud.fusion_data.get_time_range(time_range)
+                fusion_data.ps = fusion_data.ps - fusion_data.ps[0] + self.gt_data.ps[0]
+                rre.send_pose_data(fusion_data, "Fusion")
 
     def predict(self, net: InertialNetwork):
         print("> Using Model:", net.name)
-        results = self.in_data.predict_using(net, self.init_pose)
+        results = self.in_data.predict_using(net, self.gt_data)
         results.to_csv(f"results/{self.data.name}/{net.name}.csv")
 
         print(f"> Model {net.name} prediction completed.")
 
     def predict_batch(self, networks: list[InertialNetwork]):
-        self.in_data.predict_usings(networks, self.init_pose)
+        self.in_data.predict_usings(networks, self.gt_data)

@@ -1,3 +1,5 @@
+from itertools import accumulate
+
 import numpy as np
 import rerun as rr
 import rerun.blueprint as rrb
@@ -32,17 +34,15 @@ def log_coordinate(
 def rerun_init(
     name: str,
     imu_view_visible: bool = False,
-    imu_view_tags: list = [""],
+    imu_view_tags: list = [],
     imu_view_range: tuple[float, float] = (-15.0, 15.0),
+    eye_at_entity: str = "/world/Groundtruth",
 ):
     XYZ_AXIS_NAMES = ["x", "y", "z"]
     XYZ_AXIS_COLORS = [[(231, 76, 60), (39, 174, 96), (52, 120, 219)]]
 
-    assert len(imu_view_tags) > 0
-
     time_range_start = rrb.TimeRangeBoundary.cursor_relative(seconds=imu_view_range[0])
     time_range_end = rrb.TimeRangeBoundary.cursor_relative(seconds=imu_view_range[1])
-
     gyro_views = [
         rrb.TimeSeriesView(
             origin=f"gyroscope_{tag}",
@@ -95,19 +95,26 @@ def rerun_init(
 
     imu_views = gyro_views + acce_views + magn_views
 
-    rr.init(name, spawn=True)
-    blueprint = rrb.Horizontal(
-        rrb.Vertical(*imu_views, visible=imu_view_visible),
+    # 所有视图构成
+    all_views = []
+    all_views_shares = []
+    if len(imu_view_tags) > 0:
+        all_views.append(rrb.Vertical(*imu_views, visible=imu_view_visible))
+        all_views_shares.append(0.4)
+    all_views.append(
         rrb.Spatial3DView(
             origin="/",
             name="World position",
             spatial_information=rrb.SpatialInformation(show_axes=True),
             eye_controls=rrb.EyeControls3D(
-                kind="Orbital", tracking_entity="/world/groundtruth"
+                kind="Orbital", tracking_entity=eye_at_entity
             ),
-        ),
-        column_shares=[0.40, 0.60],
+        )
     )
+    all_views_shares.append(0.6)
+
+    rr.init(name, spawn=True)
+    blueprint = rrb.Horizontal(*all_views, column_shares=all_views_shares)
     rr.send_blueprint(blueprint)
     rr.log("/", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
 
@@ -141,7 +148,7 @@ def send_imu_data(imu_data: ImuData, tag: str = ""):
 
 def send_pose_data(poses_data: PosesData, tag: str = "Pose", color=None):
     times = rr.TimeColumn("timestamp", timestamp=poses_data.t_us * 1e-6)
-    ps = poses_data.trans
+    ps = poses_data.ps
     qs = poses_data.rots.as_quat(canonical=True)
 
     log_coordinate(f"/world/{tag}", length=1, labels=[tag], show_labels=False)
@@ -156,6 +163,32 @@ def send_pose_data(poses_data: PosesData, tag: str = "Pose", color=None):
         f"/world/{tag}_path",
         rr.LineStrips3D(strips=[ps], labels=[tag], colors=colors),
         static=True,
+    )
+
+
+def send_pose_data_dyn(poses_data: PosesData, tag: str = "Pose", color=None):
+    times = rr.TimeColumn("timestamp", timestamp=poses_data.t_us * 1e-6)
+    ps = poses_data.ps
+    qs = poses_data.rots.as_quat(canonical=True)
+
+    log_coordinate(f"/world/{tag}", length=1, labels=[tag], show_labels=False)
+    rr.send_columns(
+        f"/world/{tag}",
+        indexes=[times],
+        columns=rr.Transform3D.columns(quaternion=qs, translation=ps),
+    )
+
+    def _gen_path(ps: np.ndarray | list[np.ndarray]):
+        paths = list(accumulate(ps, lambda acc, x: acc + [x], initial=[]))
+        return paths[1:]
+
+    paths = _gen_path(ps)
+    tags = [tag] * len(paths) if tag is not None else None
+    colors = [np.array([color])] * len(paths) if color is not None else None
+    rr.send_columns(
+        f"/world/{tag}_path",
+        indexes=[times],
+        columns=rr.LineStrips3D.columns(strips=paths, labels=tags, colors=colors),
     )
 
 

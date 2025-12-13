@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 
 from base.interpolate import get_time_series, interpolate_vector3, slerp_rotation
+from base.rtab import RTABData
 
 
 @dataclass
@@ -46,7 +47,7 @@ class Pose:
 
     def get_yaw_rot(self):
         yaw = self.rot.as_euler("ZXY")[0]
-        return Pose(Rotation.from_euler("ZXY", [yaw, 0, 0]), np.zeros(3))
+        return Pose(Rotation.from_rotvec([0, 0, yaw]), np.zeros(3))
 
 
 Frame: TypeAlias = Literal["local", "global"]
@@ -132,16 +133,16 @@ class ImuData:
 class PosesData:
     t_us: NDArray
     rots: Rotation
-    trans: NDArray
+    ps: NDArray
 
     def __len__(self):
         return len(self.t_us)
 
-    def __getitem__(self, index):
-        if isinstance(index, int):
-            return Pose(self.rots[index], self.trans[index])
-        else:
-            raise TypeError(f"Unsupported index type: {type(index)}")
+    def __getitem__(self, index: int | slice):
+        return PosesData(self.t_us[index], self.rots[index], self.ps[index])
+
+    def get_pose(self, index: int = 0):
+        return Pose(self.rots[index], self.ps[index])
 
     def get_time_range(self, time_range: tuple[float | None, float | None]):
         ts, te = self.t_us[0], self.t_us[-1]
@@ -151,24 +152,28 @@ class PosesData:
             te = time_range[1] * 1e6 + self.t_us[0]
 
         mask = (self.t_us >= ts) & (self.t_us <= te)
-        return PosesData(self.t_us[mask], self.rots[mask], self.trans[mask])
+        return PosesData(self.t_us[mask], self.rots[mask], self.ps[mask])
 
     def interpolate(self, t_new_us: NDArray):
         rots = slerp_rotation(self.rots, self.t_us, t_new_us)
-        trans = interpolate_vector3(self.trans, self.t_us, t_new_us)
+        trans = interpolate_vector3(self.ps, self.t_us, t_new_us)
         return PosesData(t_new_us, rots, trans)
 
     def transform_local(self, tf: Pose):
         # R = R * R_loc
         # t = t + R * t_loc
-        self.trans = self.trans + self.rots.apply(tf.p)
+        self.ps = self.ps + self.rots.apply(tf.p)
         self.rots = self.rots * tf.rot
 
     def transform_global(self, tf: Pose):
         # R = R_glo * R
         # t = t_glo + R_glo * t
         self.rots = tf.rot * self.rots
-        self.trans = tf.p + tf.rot.apply(self.trans)
+        self.ps = tf.p + tf.rot.apply(self.ps)
+
+    @property
+    def rate(self):
+        return float(1e6 / np.mean(np.diff(self.t_us)))
 
 
 class GroundTruthData(PosesData):
@@ -187,14 +192,40 @@ class GroundTruthData(PosesData):
         return GroundTruthData.from_raw(raw)
 
 
-def get_ang_vec(rot: Rotation):
-    rot_vec = rot.as_rotvec()
-    angle = np.linalg.norm(rot_vec)
-    vec = rot_vec / angle
-    return vec.tolist(), float(angle) * 180 / np.pi
+class CameraColumn:
+    """
+    #timestamp [us],p_RS_R_x [m],p_RS_R_y [m],p_RS_R_z [m],q_RS_w [],q_RS_x [],q_RS_y [],q_RS_z [],p_CS_C_x [m],p_CS_C_y [m],p_CS_C_z [m],q_CS_w [],q_CS_x [],q_CS_y [],q_CS_z [],t_system [us]
+    """
+
+    t = ["#timestamp [us]"]
+    ps = ["p_RS_R_x [m]", "p_RS_R_y [m]", "p_RS_R_z [m]"]
+    qs = ["q_RS_w []", "q_RS_x []", "q_RS_y []", "q_RS_z []"]
+    pc = ["p_CS_C_x [m]", "p_CS_C_y [m]", "p_CS_C_z [m]"]
+    qc = ["q_CS_w []", "q_CS_x []", "q_CS_y []", "q_CS_z []"]
+    t_sys = ["t_system [us]"]
+
+    all = t + ps + qs + pc + qc + t_sys
+
+
+class CameraData(PosesData):
+    @staticmethod
+    def from_csv(path: Path):
+        df = pd.read_csv(path).drop_duplicates(CameraColumn.t)
+        t_sensor_us = df[CameraColumn.t].to_numpy().flatten()
+        t_us = df[CameraColumn.t_sys].to_numpy().flatten()
+        trans = df[CameraColumn.ps].to_numpy()
+        rots = df[CameraColumn.qs].to_numpy()
+        rots = Rotation.from_quat(rots, scalar_first=True)
+
+        t_us = t_sensor_us - t_sensor_us[0] + t_us[0]
+        return CameraData(t_us, rots, trans)
 
 
 class FusionData(PosesData):
+    """
+    t_us: 此时间为系统时间，非UTC时间戳
+    """
+
     @staticmethod
     def from_raw(raw: NDArray):
         t_us = raw[:, 0]
@@ -259,25 +290,39 @@ class UnitData:
     check_data: DataCheck
     calib_data: CalibrationData
 
-    def __init__(self, base_dir: Path | str):
+    def __init__(self, base_dir: Path | str, using_ext: int = True):
         base_dir = Path(base_dir)
         self.name = base_dir.name
+        self.base_dir = base_dir
 
         self._imu_path = base_dir / "imu.csv"
-        self._gt_path = base_dir / "rtab.csv"
+        self._cam_path = base_dir / "cam.csv"
+        self.__gt_path_1 = base_dir / "rtab.csv"
+        self.__gt_path_2 = base_dir / "gt.csv"
+        if not self.__gt_path_1.exists():
+            self._gt_path = self.__gt_path_2
+        # 两种文件均不存在
         if not self._gt_path.exists():
-            self._gt_path = base_dir / "gt.csv"
+            # 生成gt文件
+            db_file = RTABData.get_db_file(base_dir)
+            rtab_data = RTABData(db_file)
+            rtab_data.save_csv(self._gt_path)
+            print(f"Generated {self._gt_path}")
+
+        self._gt_path_opt = base_dir / "opt.csv"
+        if not self._gt_path_opt.exists():
+            db_file = RTABData.get_db_file(base_dir)
+            rtab_data = RTABData(db_file)
+            rtab_data.save_csv(self._gt_path_opt, using_opt=True)
+
         self._fusion_path = base_dir / "fusion.csv"
         self.has_fusion = self._fusion_path.exists()
 
         # 读取标定数据
-        self._calib_file = base_dir / "Calibration.json"
-        self._check_file = base_dir / "DataCheck.json"
-
-        self.calib_data = CalibrationData.from_json(self._calib_file)
-        self.check_data = DataCheck.from_json(self._check_file)
-
-        self.load_data()
+        if using_ext:
+            self._calib_file = base_dir / "Calibration.json"
+            self._check_file = base_dir / "DataCheck.json"
+            self.load_data()
 
     def load_data(self):
         imu_data = ImuData.from_csv(self._imu_path)
@@ -286,21 +331,22 @@ class UnitData:
             fusion_data = FusionData.from_csv(self._fusion_path)
             self.fusion_data = fusion_data
 
+        self.correct(gt_data, imu_data)
+
+    def correct(self, gt_data: GroundTruthData, imu_data: ImuData):
+        self.calib_data = CalibrationData.from_json(self._calib_file)
+        self.check_data = DataCheck.from_json(self._check_file)
         # 时间修正
         gt_data.t_us += self.check_data.t_gi_us
-
         # 空间变换
         gt_data.transform_local(self.calib_data.tf_sg_local.inverse())
         # gt_data.transform_global(self.calib_data.tf_sg_global)
-        gt_data.transform_global(gt_data[0].get_yaw_rot().inverse())
+        gt_data.transform_global(gt_data.get_pose(0).get_yaw_rot().inverse())
 
         # 数据对齐
         t_new_us = get_time_series([imu_data.t_us, gt_data.t_us])
         self.imu_data = imu_data.interpolate(t_new_us)
         self.gt_data = gt_data.interpolate(t_new_us)
-
-    # def set_time_range(self, time_range:tuple[float, float]):
-    # pass
 
 
 class DeviceDataset:

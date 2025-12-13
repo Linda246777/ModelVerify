@@ -1,3 +1,12 @@
+"""
+作者: qi-xmu
+功能: TorchScript模型转Android兼容格式工具
+描述: 该脚本用于将PyTorch的TorchScript模型转换为Android平台可使用的格式，
+      支持模型优化和量化功能以提高在移动设备上的推理性能。
+用法:
+    python TorchScript2Android.py -i input_model.pt -o output_model.pt
+"""
+
 import torch
 import torch.utils.mobile_optimizer as mobile_optimizer
 
