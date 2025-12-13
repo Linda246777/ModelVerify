@@ -429,6 +429,7 @@ dependencies = [
     { name = "rerun-sdk" },
     { name = "scipy" },
     { name = "scipy-stubs" },
+    { name = "sophuspy" },
     { name = "torch" },
 ]
 
@@ -441,6 +442,7 @@ requires-dist = [
     { name = "rerun-sdk", specifier = ">=0.27.2" },
     { name = "scipy", specifier = ">=1.16.3" },
     { name = "scipy-stubs", specifier = ">=1.16.3.0" },
+    { name = "sophuspy", specifier = ">=1.2.0" },
     { name = "torch", specifier = ">=2.9.1" },
 ]
 
@@ -1071,6 +1073,31 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "sophuspy"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/38/39/a7a0fc2ac4866c3cba51c6c05b625cd3ac9a8c7e2b67614959c30f31c294/sophuspy-1.2.0.tar.gz", hash = "sha256:a88d106589fa3d89777226f1df4f419a7aaafa441fc2070092726aa4573eed9f", size = 1188145, upload-time = "2024-02-23T16:44:15.173Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1b/98/4bd60bcef4fcb76cdf65881fd052fec7be616ae3d431ce3501f293edfec1/sophuspy-1.2.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:2ab2fc7cd31e4f12c3373c1d2515f5e973087029d3200d46abb8ae088ba5d46c", size = 204169, upload-time = "2024-02-23T16:42:29.755Z" },
+    { url = "https://files.pythonhosted.org/packages/37/77/ced4551f37456b3c07c0cda4d01ad35d396b125f682493a052b50329bdb0/sophuspy-1.2.0-cp311-cp311-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:3f293dec1d503d29f6c6372a69578b87dc3728bb73eb5126d5e866af1f4c176b", size = 246304, upload-time = "2024-02-23T16:42:31.124Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/1e/2593a3f1e4615b7780af0b44ea4ad81ce41c3e9b23b545745b49938682bc/sophuspy-1.2.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:44902a365fa288d7ae1f0cab7e3d0891969f94fd2fd06c2c7a9d7bcd58ee6e4b", size = 239219, upload-time = "2024-02-23T16:42:33.324Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/c5/f6098003dfcc758b0f05938fa5d8db78072be532f1b5764ca1b5314259ba/sophuspy-1.2.0-cp311-cp311-musllinux_1_1_i686.whl", hash = "sha256:12831b4117f9e79bc60d1d3e1855cabee7225783a6c8d24adb7acb681f2a9357", size = 803669, upload-time = "2024-02-23T16:42:35.447Z" },
+    { url = "https://files.pythonhosted.org/packages/98/1b/6a5769dc477b9321b6b6c3592451f2ed36c88bf9348dcafee2195359883f/sophuspy-1.2.0-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:70760473fa6e8ce49b948c36997048903fba74567704c5311e5fb89fd4c73eac", size = 744402, upload-time = "2024-02-23T16:42:37.048Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/4c/bc6d2d60896ce7e19e7759ea48d6583c4c3f48982f983930b9b6c4516390/sophuspy-1.2.0-cp311-cp311-win32.whl", hash = "sha256:6374177bc16478340ae85ca41df5baa85e53d94695b8596adae37f222023d5ef", size = 149262, upload-time = "2024-02-23T16:42:39.389Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/7a/adadd41e88e2e85e15cdb2147754c3786d5fbbeda172fff5e4e7172b3670/sophuspy-1.2.0-cp311-cp311-win_amd64.whl", hash = "sha256:3890fb793f105ef39af06fac9f4f80c6d37eb17a77f529bee3317edf9daf323a", size = 165250, upload-time = "2024-02-23T16:42:40.848Z" },
+    { url = "https://files.pythonhosted.org/packages/49/79/b1db5eb695284d371223af641b8741749512112123582369d29e3d70909d/sophuspy-1.2.0-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:7ba03043b327549ba7149193381ed2847b43ed6271e147c011b153dfea6a6036", size = 203742, upload-time = "2024-02-23T16:42:42.788Z" },
+    { url = "https://files.pythonhosted.org/packages/f4/a3/75d1157796dee5905ba7750b3becc107aed4355c92000609c534329d421f/sophuspy-1.2.0-cp312-cp312-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:685e9ef04aff5630022305e4bb8101a02bf18fd06b42a4d95dc9c27bca6d9956", size = 248661, upload-time = "2024-02-23T16:42:44.262Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/35/8d83517330d1ed5522628405a439c3f14f7d93a8b21eafce4b00d2c8d238/sophuspy-1.2.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:cd7e1e04e3baab4cd51672fdb26c794292c681d7ab8d365ced111108e75dfc47", size = 238570, upload-time = "2024-02-23T16:42:46.249Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/91/b0b4de4c804e2a7dbbc79932a73da45793cdf36e7544a72d8b39d31c3c84/sophuspy-1.2.0-cp312-cp312-musllinux_1_1_i686.whl", hash = "sha256:409d691ec871504a932f347f2c52d7ee82112d4b6c7428b447be0f3cb293d403", size = 802709, upload-time = "2024-02-23T16:42:47.728Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/f0/fa6b42a90ab966b68cd581d6905579bbbbb8919df515a037a29a8d0b4d16/sophuspy-1.2.0-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:856065c81b71f191c8fc0d99cbdc378535896719c5a9c32cadd56d9989d9fe87", size = 744485, upload-time = "2024-02-23T16:42:49.863Z" },
+    { url = "https://files.pythonhosted.org/packages/61/27/c64e32a1f25f91092306afd82e06591fff3af8bb924de664b00f1d5735ee/sophuspy-1.2.0-cp312-cp312-win32.whl", hash = "sha256:4f1b13f0487da32bafba5eae2d3b5314f53a8cf5fd27de0fdb0688a720cc3b47", size = 147358, upload-time = "2024-02-23T16:42:51.269Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/83/df10882d730a095455aebac38d7181e2fae52f163431ab0d27b08583e4e2/sophuspy-1.2.0-cp312-cp312-win_amd64.whl", hash = "sha256:47b7cf8c0f8686231b5819794114e97979666bc732a3eca19c4774c42c75075b", size = 165154, upload-time = "2024-02-23T16:42:52.58Z" },
 ]
 
 [[package]]

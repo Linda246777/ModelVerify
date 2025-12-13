@@ -34,8 +34,10 @@ from base.datatype import (
     GroundTruthData,
     ImuData,
     Pose,
+    PosesData,
     UnitData,
 )
+from base.evaluate import Evaluation
 from base.interpolate import get_time_series
 from base.model import DataRunner, InertialNetworkData, ModelLoader
 
@@ -69,7 +71,7 @@ def main():
         ud = UnitData(dap.unit, using_ext=False)
         imu_data = ImuData.from_csv(ud._imu_path)
         gt_data = GroundTruthData.from_csv(ud._gt_path)
-        cam_data = CameraData.from_csv(ud._cam_path)
+        camera_data = CameraData.from_csv(ud._cam_path)
         fusion_data = FusionData.from_csv(ud.base_dir / "fusion_desktop.csv")
         result_data = CameraData.from_csv(ud.base_dir / "result.csv")
 
@@ -81,7 +83,7 @@ def main():
         gt_data.transform_local(DefaultBodyTransform)
         gt_data.transform_global(tf_gc.inverse())
         gt_data.ps -= gt_data.ps[0]
-        cam_data.ps -= cam_data.ps[0]
+        camera_data.ps -= camera_data.ps[0]
         fusion_data.ps -= fusion_data.ps[0]
 
         # 获取共同的时间窗口
@@ -89,14 +91,14 @@ def main():
             [
                 gt_data.t_us,
                 imu_data.t_us,
-                cam_data.t_us,
+                camera_data.t_us,
                 fusion_data.t_us,
                 result_data.t_us,
             ]
         )
         gt_data = gt_data.interpolate(t_new_us)
         imu_data = imu_data.interpolate(t_new_us)
-        cam_data = cam_data.interpolate(t_new_us)
+        camera_data = camera_data.interpolate(t_new_us)
         fusion_data = fusion_data.interpolate(t_new_us)
         result_data = result_data.interpolate(t_new_us)
 
@@ -104,14 +106,23 @@ def main():
         bre.rerun_init(ud.name)
         bre.send_pose_data(gt_data, "Groundtruth", color=[192, 72, 72])
         bre.send_pose_data(fusion_data, "Fusion", color=[72, 192, 72])
-        bre.send_pose_data(cam_data, "Camera", color=[72, 72, 192])
+        bre.send_pose_data(camera_data, "Camera", color=[72, 72, 192])
         bre.send_pose_data(result_data, "Reuslt", color=[192, 192, 72])
 
         # 模型推理
         ud.gt_data = gt_data
         ud.imu_data = imu_data
-        runner = DataRunner(ud, Data, using_gt=True, has_init_rerun=True)
-        runner.predict_batch(loader.get_by_names(models))
+        # runner = DataRunner(ud, Data, using_gt=True, has_init_rerun=True)
+        # net_results = runner.predict_batch(loader.get_by_names(models))
+        # netres_data = PosesData.from_list(net_results[0].pose_list)
+
+        # 计算 ATE
+        evaluator = Evaluation(gt_data)
+        evaluator.get_eval(camera_data, "camera")
+        evaluator.get_eval(fusion_data, "fusion")
+        evaluator.get_eval(result_data, "result")
+        # evaluator.get_eval(netres_data, "netres")
+        evaluator.print()
 
     elif dap.dataset:
         dataset_path = dap.dataset

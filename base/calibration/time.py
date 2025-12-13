@@ -82,5 +82,4 @@ def match21(
     # 构造绕z轴的旋转
     rad = np.mean(np.array(angles))
     rot21 = Rotation.from_rotvec([0, 0, rad])
-    print(rot21.as_rotvec(degrees=True))
     return t21_us, Pose(rot21, np.zeros(3))

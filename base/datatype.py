@@ -16,9 +16,10 @@ from base.rtab import RTABData
 class Pose:
     rot: Rotation
     p: NDArray
+    t_us: int = 0
 
     def copy(self):
-        return Pose(self.rot, self.p.copy())
+        return Pose(self.rot, self.p.copy(), self.t_us)
 
     @staticmethod
     def identity():
@@ -51,6 +52,91 @@ class Pose:
 
 
 Frame: TypeAlias = Literal["local", "global"]
+
+
+@dataclass
+class PosesData:
+    t_us: NDArray
+    rots: Rotation
+    ps: NDArray
+
+    def __len__(self):
+        return len(self.t_us)
+
+    def __getitem__(self, index: int | slice):
+        return PosesData(self.t_us[index], self.rots[index], self.ps[index])
+
+    def __iter__(self):
+        for i in range(len(self.t_us)):
+            yield Pose(self.rots[i], self.ps[i], self.t_us[i])
+
+    @staticmethod
+    def from_list(pose_list: list[Pose]):
+        rotations = []
+        translates = []
+        t_us = []
+        for pose in pose_list:
+            rotations.append(pose.rot.as_matrix())
+            translates.append(pose.p)
+            t_us.append(pose.t_us)
+
+        t_us = np.array(t_us)
+        rots = Rotation.from_matrix(rotations)
+        ps = np.array(translates)
+        return PosesData(t_us, rots, ps)
+
+    def get_pose(self, index: int = 0):
+        return Pose(self.rots[index], self.ps[index], self.t_us[index])
+
+    def get_time_range(self, time_range: tuple[float | None, float | None]):
+        ts, te = self.t_us[0], self.t_us[-1]
+        if time_range[0] is not None:
+            ts = time_range[0] * 1e6 + self.t_us[0]
+        if time_range[1] is not None:
+            te = time_range[1] * 1e6 + self.t_us[0]
+        return self.get_time_region((ts, te))
+
+    def get_time_region(self, t_region: tuple[int, int]):
+        ts, te = t_region
+        mask = (self.t_us >= ts) & (self.t_us <= te)
+        return PosesData(self.t_us[mask], self.rots[mask], self.ps[mask])
+
+    def interpolate(self, t_new_us: NDArray):
+        rots = slerp_rotation(self.rots, self.t_us, t_new_us)
+        trans = interpolate_vector3(self.ps, self.t_us, t_new_us)
+        return PosesData(t_new_us, rots, trans)
+
+    def transform_local(self, tf: Pose):
+        # R = R * R_loc
+        # t = t + R * t_loc
+        self.ps = self.ps + self.rots.apply(tf.p)
+        self.rots = self.rots * tf.rot
+
+    def transform_global(self, tf: Pose):
+        # R = R_glo * R
+        # t = t_glo + R_glo * t
+        self.rots = tf.rot * self.rots
+        self.ps = tf.p + tf.rot.apply(self.ps)
+
+    @property
+    def rate(self):
+        return float(1e6 / np.mean(np.diff(self.t_us)))
+
+    @property
+    def length_meter(self):
+        """
+        获取轨迹长度 meter
+        """
+        disps = np.diff(self.ps, axis=0)
+        disp_lens = np.linalg.norm(disps, axis=1)
+        return np.sum(disp_lens)
+
+    def length_meter_fix_rate(self, rate: int = 1):
+        """
+        设定固定频率 获取轨迹长度 meter
+        """
+        t_new_us = get_time_series([self.t_us], rate=rate)
+        return self.interpolate(t_new_us).length_meter
 
 
 @dataclass
@@ -127,53 +213,6 @@ class ImuData:
             self.magn[m],
             self.frame,
         )
-
-
-@dataclass
-class PosesData:
-    t_us: NDArray
-    rots: Rotation
-    ps: NDArray
-
-    def __len__(self):
-        return len(self.t_us)
-
-    def __getitem__(self, index: int | slice):
-        return PosesData(self.t_us[index], self.rots[index], self.ps[index])
-
-    def get_pose(self, index: int = 0):
-        return Pose(self.rots[index], self.ps[index])
-
-    def get_time_range(self, time_range: tuple[float | None, float | None]):
-        ts, te = self.t_us[0], self.t_us[-1]
-        if time_range[0] is not None:
-            ts = time_range[0] * 1e6 + self.t_us[0]
-        if time_range[1] is not None:
-            te = time_range[1] * 1e6 + self.t_us[0]
-
-        mask = (self.t_us >= ts) & (self.t_us <= te)
-        return PosesData(self.t_us[mask], self.rots[mask], self.ps[mask])
-
-    def interpolate(self, t_new_us: NDArray):
-        rots = slerp_rotation(self.rots, self.t_us, t_new_us)
-        trans = interpolate_vector3(self.ps, self.t_us, t_new_us)
-        return PosesData(t_new_us, rots, trans)
-
-    def transform_local(self, tf: Pose):
-        # R = R * R_loc
-        # t = t + R * t_loc
-        self.ps = self.ps + self.rots.apply(tf.p)
-        self.rots = self.rots * tf.rot
-
-    def transform_global(self, tf: Pose):
-        # R = R_glo * R
-        # t = t_glo + R_glo * t
-        self.rots = tf.rot * self.rots
-        self.ps = tf.p + tf.rot.apply(self.ps)
-
-    @property
-    def rate(self):
-        return float(1e6 / np.mean(np.diff(self.t_us)))
 
 
 class GroundTruthData(PosesData):

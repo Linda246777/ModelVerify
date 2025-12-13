@@ -101,7 +101,6 @@ class NetworkResult:
         *,
         step: int = 10,
         rate: int = 200,
-        t_start_us: int,
         using_rerun: bool = True,
     ):
         self.tag = tag
@@ -109,7 +108,6 @@ class NetworkResult:
         self.rate = rate
         self.using_rerun = using_rerun
         self.interval_us = int(1e6 * step / rate)
-        self.t_us = [t_start_us]
 
         self.meas_list = []
         self.meas_cov_list = []
@@ -135,16 +133,14 @@ class NetworkResult:
         self.meas_list.append(output[0])
         self.meas_cov_list.append(output[1])
 
-        t_us = self.interval_us + self.t_us[-1]
-        disp = output[0] * self.interval_us / 1e6
-        self.positon += disp
+        self.positon += output[0] * self.interval_us / 1e6
         ref_pose.p = self.positon
-        self.pose_list.append(ref_pose)
-        self.path.append(self.positon.copy())
-        self.t_us.append(t_us)
+
+        self.pose_list.append(ref_pose.copy())
+        self.path.append(ref_pose.p.copy())
 
         if self.using_rerun:
-            rre.log_network_pose(t_us, ref_pose, self.path, tag=self.tag)
+            rre.log_network_pose(ref_pose.t_us, ref_pose, self.path, tag=self.tag)
         return ref_pose
 
     def to_csv(self, path: Path | str):
@@ -244,11 +240,7 @@ class InertialNetworkData:
 
     def predict_using(self, net: InertialNetwork, ref_poses: PosesData):
         result = NetworkResult(
-            net.name,
-            ref_poses.get_pose(0).p,
-            step=self.step,
-            rate=self.rate,
-            t_start_us=self.world_imu_data.t_us[0],
+            net.name, ref_poses.get_pose(0).p, step=self.step, rate=self.rate
         )
         for idx, block in self.get_block_idx():
             _pose = result.add(net.predict(block), ref_poses.get_pose(idx))
@@ -258,11 +250,7 @@ class InertialNetworkData:
     def predict_usings(self, networks: list[InertialNetwork], ref_poses: PosesData):
         results = [
             NetworkResult(
-                model.name,
-                ref_poses.get_pose(0).p,
-                step=self.step,
-                rate=self.rate,
-                t_start_us=self.world_imu_data.t_us[0],
+                model.name, ref_poses.get_pose(0).p, step=self.step, rate=self.rate
             )
             for model in networks
         ]
@@ -314,4 +302,4 @@ class DataRunner:
         print(f"> Model {net.name} prediction completed.")
 
     def predict_batch(self, networks: list[InertialNetwork]):
-        self.in_data.predict_usings(networks, self.gt_data)
+        return self.in_data.predict_usings(networks, self.gt_data)
