@@ -389,11 +389,13 @@ class UnitData:
 
 
 class DeviceDataset:
-    def __init__(self, base_dir: Path | str):
+    def __init__(self, base_dir: Path | str, using_ext: bool = True):
         self.base_dir = Path(base_dir)
         self.device_name = self.base_dir.name
         self.units = [
-            UnitData(path) for path in self.base_dir.iterdir() if path.is_dir()
+            UnitData(path, using_ext)
+            for path in self.base_dir.iterdir()
+            if path.is_dir()
         ]
 
     def __getitem__(self, index):

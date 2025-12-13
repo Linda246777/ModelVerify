@@ -64,11 +64,7 @@ def main():
     if dap.args.models_path is not None:
         models_path = dap.args.models_path
 
-    loader = ModelLoader(models_path)
-    Data = InertialNetworkData.set_step(20)
-    if dap.unit:
-        # 数据
-        ud = UnitData(dap.unit, using_ext=False)
+    def action(ud: UnitData):
         imu_data = ImuData.from_csv(ud._imu_path)
         gt_data = GroundTruthData.from_csv(ud._gt_path)
         camera_data = CameraData.from_csv(ud._cam_path)
@@ -112,25 +108,28 @@ def main():
         # 模型推理
         ud.gt_data = gt_data
         ud.imu_data = imu_data
-        # runner = DataRunner(ud, Data, using_gt=True, has_init_rerun=True)
-        # net_results = runner.predict_batch(loader.get_by_names(models))
-        # netres_data = PosesData.from_list(net_results[0].pose_list)
+        runner = DataRunner(ud, Data, using_gt=True, has_init_rerun=True)
+        net_results = runner.predict_batch(loader.get_by_names(models))
+        netres_data = PosesData.from_list(net_results[0].pose_list)
 
         # 计算 ATE
         evaluator = Evaluation(gt_data)
         evaluator.get_eval(camera_data, "camera")
         evaluator.get_eval(fusion_data, "fusion")
         evaluator.get_eval(result_data, "result")
-        # evaluator.get_eval(netres_data, "netres")
+        evaluator.get_eval(netres_data, "netres")
         evaluator.print()
 
+    loader = ModelLoader(models_path)
+    Data = InertialNetworkData.set_step(20)
+    if dap.unit:
+        ud = UnitData(dap.unit, using_ext=False)
+        action(ud)
     elif dap.dataset:
         dataset_path = dap.dataset
-        datas = DeviceDataset(dataset_path)
+        datas = DeviceDataset(dataset_path, False)
         for ud in datas:
-            pass
-            # runner = DataRunner(data, Data, time_range=time_range)
-            # runner.predict_batch(loader.get_by_names(models))
+            action(ud)
     else:
         # dap.parser.print_help()
         pass
