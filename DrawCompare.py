@@ -24,9 +24,9 @@ python DrawCompare.py --dataset /path/to/dataset --models_path /custom/models/pa
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from base.binary import SensorFusion
 import base.rerun_ext as bre
 from base.args_parser import DatasetArgsParser
+from base.binary import SensorFusion
 from base.calibration import time
 from base.datatype import (
     CameraData,

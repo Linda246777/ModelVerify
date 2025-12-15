@@ -29,9 +29,13 @@ class Evaluation:
 
         # 计算其他信息
         self.length = ref_poses.length_meter
+        self.time_length = (ref_poses.t_us[-1] - ref_poses.t_us[0]) / 1e6
+        self.mean_velocity = self.length / self.time_length
 
         # map
         self.resdict["ref_length"] = self.length
+        self.resdict["ref_time_length"] = self.time_length
+        self.resdict["ref_mean_velocity"] = self.mean_velocity
 
     def __str__(self):
         return json.dumps(self.resdict, indent=4)
@@ -55,7 +59,6 @@ class Evaluation:
     def get_eval(self, eva_poses: PosesData, tag: str):
         ref_poses = self.ref_poses
 
-        # t_region = self.__get_time_region(ref_poses.t_us, eva_poses.t_us)
         rate = int(ref_poses.rate)
         t_new_us = get_time_series([ref_poses.t_us, eva_poses.t_us], rate=rate)
         ref_poses = ref_poses.interpolate(t_new_us)

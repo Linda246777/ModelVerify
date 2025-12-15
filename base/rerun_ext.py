@@ -161,7 +161,7 @@ def send_pose_data(poses_data: PosesData, tag: str = "Pose", color=None):
     colors = [color] if color is not None else None
     rr.log(
         f"/world/{tag}_path",
-        rr.LineStrips3D(strips=[ps], labels=[tag], colors=colors),
+        rr.LineStrips3D(strips=[ps], labels=[tag], colors=colors, show_labels=True),
         static=True,
     )
 
@@ -203,5 +203,10 @@ def log_network_pose(
     if path is not None:
         rr.log(
             f"/world/{tag}_path",
-            rr.LineStrips3D(strips=[path], labels=[f"{tag}"]),
+            rr.LineStrips3D(
+                strips=[path],
+                labels=[f"{tag}"],
+                colors=[[192, 72, 192]],
+                show_labels=True,
+            ),
         )
