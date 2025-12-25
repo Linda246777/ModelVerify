@@ -1,19 +1,15 @@
-import importlib.util
-from pathlib import Path
 import importlib
+import importlib.util
 import sys
+from pathlib import Path
 
 from base.datatype import UnitData
-
-PROJECT_PATH = Path(
-    "/Users/qi/Codespace/Android/NAVIO/app/src/main/cpp/SensorFusionAndroid/"
-)
 
 
 class SensorFusion:
     TARGET = "SensorFusionAndroid"
 
-    def __init__(self, project_path: str | Path = PROJECT_PATH):
+    def __init__(self, project_path: str | Path):
         self.project_path = Path(project_path)
         self.configs_path = self.project_path / "configs"
         self.build_path = self.project_path / "build"

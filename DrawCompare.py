@@ -42,8 +42,13 @@ from base.evaluate import Evaluation
 from base.interpolate import get_time_series
 from base.model import DataRunner, InertialNetworkData, ModelLoader
 
+# 真值的Body坐标系和Sensor的Body坐标系存在的固定插值
 DefaultBodyRotation = Rotation.from_rotvec([0, -90, 0], degrees=True)
 DefaultBodyTransform = Pose(DefaultBodyRotation, np.zeros(3))
+# 使用融合算法推理轨迹，指定项目路径
+ProjectPath = (
+    "/Users/qi/Codespace/Android/NAVIO/navio_sdk/src/main/cpp/SensorFusionAndroid"
+)
 
 
 class DrawUnitData(UnitData):
@@ -70,19 +75,19 @@ def main():
     Data = InertialNetworkData.set_step(20)
 
     nets = loader.get_by_names(model_names)
-    model = nets[0].model_path.absolute()
 
     def action(ud: UnitData):
-        # sensor fusion 生成数据
-        sf = SensorFusion()
+        # NOTE: sensor fusion 生成数据
+        sf = SensorFusion(ProjectPath)
+        model = nets[0].model_path.absolute()
         res_dir = sf.unit_run(ud, model=model)
+        fusion_data = FusionData.from_csv(res_dir)
+        # fusion_data = result_data
 
         imu_data = ImuData.from_csv(ud._imu_path)
         gt_data = GroundTruthData.from_csv(ud._gt_path)
         camera_data = CameraData.from_csv(ud._cam_path)
-        fusion_data = FusionData.from_csv(res_dir)
         result_data = CameraData.from_csv(ud.base_dir / "result.csv")
-        # fusion_data = result_data
 
         # 完成时间校准
         time_gc = time.match21(fusion_data, gt_data)
@@ -120,7 +125,7 @@ def main():
         # 可视化
         bre.rerun_init(ud.name)
         bre.send_pose_data(ud.gt_data, "Groundtruth", color=[192, 72, 72])
-        bre.send_pose_data(gt_data, "__gtc", color=[192, 72, 72])
+        # bre.send_pose_data(gt_data, "__gtc", color=[192, 72, 72])
         bre.send_pose_data(fusion_data, "Fusion", color=[72, 192, 72])
         bre.send_pose_data(camera_data, "Camera", color=[72, 72, 192])
         bre.send_pose_data(result_data, "Reuslt", color=[192, 192, 72])
@@ -148,7 +153,6 @@ def main():
         for ud in datas:
             action(ud)
     else:
-        # dap.parser.print_help()
         pass
 
 

@@ -258,12 +258,19 @@ class InertialNetworkData:
         print(block)
         return block
 
-    def predict_using(self, net: InertialNetwork, ref_poses: PosesData):
-        result = NetworkResult(
-            net.name, ref_poses.get_pose(0).p, step=self.step, rate=self.rate
-        )
+    def predict_using(self, net: InertialNetwork, ref_poses: PosesData | None = None):
+        if ref_poses is None:
+            init_pos = np.zeros(3).astype(np.float64)
+        else:
+            init_pos = ref_poses.get_pose(0).p
+
+        result = NetworkResult(net.name, init_pos, step=self.step, rate=self.rate)
         for idx, block in self.get_block_idx():
-            _pose = result.add(net.predict(block), ref_poses.get_pose(idx))
+            ref_pose = (
+                ref_poses.get_pose(idx) if ref_poses is not None else Pose.identity()
+            )
+            net_out = net.predict(block)
+            _pose = result.add(net_out, ref_pose)
             print(f"{net.name}-{self.bc}: {_pose.p}")
         return result
 

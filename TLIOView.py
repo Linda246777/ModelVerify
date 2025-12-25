@@ -30,19 +30,21 @@ class TLIOData:
         ps = data[:, 11:14]
         vs = data[:, 14:17]
 
-        self.imu_data = ImuData(t_us, gyro, acce, rots, "global")
+        self.imu_data = ImuData(
+            t_us, gyro, acce, rots, np.zeros_like(acce), frame="global"
+        )
         self.gt_data = PosesData(t_us, rots, ps)
         self.velocities = vs
 
 
 def tlio_view(path: str | Path, net: InertialNetwork):
     td = TLIOData(path)
-    rre.rerun_init(td.name, imu_view_tags=["GT"])
-    rre.send_pose_data(td.gt_data, "GT")
-    rre.send_imu_data(td.imu_data, tag="GT")
+    rre.rerun_init(td.name, imu_view_tags=["Groundtruth"])
+    rre.send_pose_data(td.gt_data, "Groundtruth")
+    rre.send_imu_data(td.imu_data, tag="Groundtruth")
 
     in_data = InertialNetworkData(td.imu_data)
-    in_data.predict_using(net)
+    in_data.predict_using(net, td.gt_data)
 
 
 if __name__ == "__main__":
@@ -50,7 +52,7 @@ if __name__ == "__main__":
     models_path = "Models"
     loader = ModelLoader(models_path)
 
-    net = loader.get_by_name("model_mi_hw_1126")
+    net = loader.get_by_name("model_tlio_mi_hw_1216")
     if args.unit is not None:
         tlio_view(args.unit, net)
     elif args.dataset is not None:

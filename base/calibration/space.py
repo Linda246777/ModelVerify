@@ -29,6 +29,7 @@ def global12(
     """
     # 插值对齐
     t_new_us = get_time_series([cs1.t_us, cs2.t_us], rate=100)
+    t_new_us = t_new_us[: 100 * 20]
     cs1 = cs1.interpolate(t_new_us)
     cs2 = cs2.interpolate(t_new_us)
 
