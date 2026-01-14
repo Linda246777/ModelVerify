@@ -102,7 +102,7 @@ def main():
             assert isinstance(netres, NetworkResult)
             all_errors.extend(netres.err_list)
 
-        model_cdf = Evaluation.get_cdf(all_errors, model_names[0])
+        model_cdf = Evaluation.get_cdf(all_errors, nets[0].name)
         plot_one_cdf(model_cdf, res_dir / "CDF.png")
 
 
