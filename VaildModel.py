@@ -2,7 +2,31 @@
 """
 验证模型效果
 
-验证单个模型在数据集上的效果。
+验证单个模型在数据集上的效果，生成CDF图和ATE/APE/RPE等评估指标。
+
+用法:
+    # 验证单个数据单元
+    python VaildModel.py -u <unit_path> -m model_name
+
+    # 验证整个数据集
+    python VaildModel.py -d <dataset_path> -m model_name
+
+    # 指定模型文件夹
+    python VaildModel.py -u <unit_path> -m model_name --models_path /path/to/models
+
+参数:
+    -u, --unit: 指定单个数据单元路径
+    -d, --dataset: 指定数据集路径
+    -m, --models: 指定模型文件名（支持多个）
+    --models_path: 指定模型文件夹路径（默认为"models"）
+
+输出:
+    - results/<model_name>/<unit_name>/: 单个单元的结果目录
+      - CDF.png: 误差累积分布函数图
+      - Eval.json: 评估指标（ATE/APE/RPE）
+    - results/<model_name>_<device_name>/: 数据集结果目录
+      - CDF.png: 整体误差CDF图
+    - results/<model_name>/temp/: 临时结果缓存
 """
 
 import pickle
@@ -15,6 +39,7 @@ from base.draw.CDF import plot_one_cdf
 from base.evaluate import Evaluation
 from base.model import DataRunner, InertialNetworkData, ModelLoader, NetworkResult
 
+# 默认结果输出路径
 EvalDir = Path("results")
 
 
@@ -25,6 +50,8 @@ def main():
     dap.parse()
 
     # regen_fusion = dap.regen
+    assert dap.unit is not None
+    unit_path = Path(dap.unit)
     model_names = dap.args.models
     if model_names is None or len(model_names) == 0:
         model_names = ["model_resnet_0111_96"]
@@ -37,10 +64,7 @@ def main():
     Data = InertialNetworkData.set_step(20)
     nets = loader.get_by_names(model_names)
 
-    res_dir = EvalDir / f"{nets[0].name}"
-    res_dir.mkdir(parents=True, exist_ok=True)
-
-    def action(ud: UnitData):
+    def action(ud: UnitData, res_dir: Path):
         print(f"> Eval {ud.name}")
         # 如果已经计算过
         obj_path = res_dir / "temp" / f"action_{ud.name}.pkl"
@@ -54,8 +78,8 @@ def main():
                 return netres, evaluator
 
         # 数据保存路径
-        unit_dir = res_dir / ud.name
-        unit_dir.mkdir(parents=True, exist_ok=True)
+        unit_out_dir = res_dir / ud.name
+        unit_out_dir.mkdir(parents=True, exist_ok=True)
 
         # 加载数据
         ud.load_data(using_opt=True)
@@ -68,13 +92,13 @@ def main():
 
         # 绘制 CDF
         model_cdf = Evaluation.get_cdf(netres[0].err_list, nets[0].name)
-        plot_one_cdf(model_cdf, unit_dir / "CDF.png", show=False)
+        plot_one_cdf(model_cdf, unit_out_dir / "CDF.png", show=False)
 
         # 计算 ATE
         evaluator = Evaluation(ud.gt_data, name=ud.name, rel_duration=1)
         evaluator.get_eval(netres[0].poses, f"{nets[0].name}_{ud.name}")
         evaluator.print()
-        evaluator.save(unit_dir / "Eval.json")
+        evaluator.save(unit_out_dir / "Eval.json")
 
         # 保存结果
         with open(obj_path, "wb") as f:
@@ -83,18 +107,24 @@ def main():
         return netres, evaluator
 
     if dap.unit:
-        ud = UnitData(dap.unit)
-        netres, evaluator = action(ud)
+        # 使用 网络名称
+        res_dir = EvalDir / f"{nets[0].name}"
+        res_dir.mkdir(parents=True, exist_ok=True)
+
+        ud = UnitData(unit_path)
+        netres, evaluator = action(ud, res_dir)
 
     elif dap.dataset:
-        dataset_path = dap.dataset
+        dataset_path = Path(dap.dataset)
         datas = DeviceDataset(dataset_path)
+        # 使用 网络名称 + 设备名称
+        res_dir = EvalDir / f"{nets[0].name}_{datas.device_name}"
+        res_dir.mkdir(parents=True, exist_ok=True)
+        # 存储结果
         netres_list: list[NetworkResult] = []
-        evaluator_list: list[Evaluation] = []
         for ud in datas:
-            netres, evaluator = action(ud)
+            netres, evaluator = action(ud, res_dir)
             netres_list.extend(netres)
-            evaluator_list.append(evaluator)
 
         # 合并所有netres的误差项
         all_errors = []
@@ -102,6 +132,7 @@ def main():
             assert isinstance(netres, NetworkResult)
             all_errors.extend(netres.err_list)
 
+        # 绘制总体的结果
         model_cdf = Evaluation.get_cdf(all_errors, nets[0].name)
         plot_one_cdf(model_cdf, res_dir / "CDF.png")
 
