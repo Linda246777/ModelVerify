@@ -10,7 +10,7 @@ from scipy.spatial.transform import Rotation
 import base.rerun_ext as rre
 
 from . import device
-from .datatype import ImuData, Pose, PosesData, UnitData
+from .datatype import ExtUnitData, ImuData, Pose, PosesData, UnitData
 
 NetworkOutput: TypeAlias = tuple[NDArray, NDArray]
 
@@ -25,7 +25,7 @@ class InertialNetwork:
     ):
         self.model_path = Path(model_path)
         self.name = self.model_path.name.split(".")[0]
-        self.device = device.CpuDevice
+        self.device = device.DefaultDevice
         self.model = torch.jit.load(self.model_path, map_location=self.device)
         self.input_shape = input_shape
         self.model.eval()
@@ -146,14 +146,16 @@ class NetworkResult:
     step: int
     rate: int
     t_start_us: int
-
+    # 测量结果
     meas_list: list[NDArray]
     meas_cov_list: list[NDArray]
 
+    gt_list: list[NDArray]  # 真值
+    err_list: list  # 误差
+
     t_us: list[int]
     pose: Pose
-    # path: list[NDArray] = []
-    pose_list: list[Pose]
+    pose_list: list[Pose]  # 位置结果
 
     def __init__(
         self,
@@ -169,6 +171,9 @@ class NetworkResult:
         self.rate = rate
         self.using_rerun = using_rerun
         self.interval_us = int(1e6 * step / rate)
+
+        self.gt_list = []
+        self.err_list = []
 
         self.meas_list = []
         self.meas_cov_list = []
@@ -190,7 +195,16 @@ class NetworkResult:
     def __getitem__(self, index: int):
         return self.meas_list[index], self.meas_cov_list[index]
 
-    def add(self, output: NetworkOutput, ref_pose: Pose = Pose.identity()):
+    @property
+    def poses(self):
+        return PosesData.from_list(self.pose_list)
+
+    def add(
+        self,
+        output: NetworkOutput,
+        ref_pose: Pose = Pose.identity(),
+        ref_disp: NDArray | None = None,
+    ):
         self.meas_list.append(output[0])
         self.meas_cov_list.append(output[1])
 
@@ -202,6 +216,13 @@ class NetworkResult:
 
         if self.using_rerun and ref_pose.t_us > 0:
             rre.log_network_pose(ref_pose.t_us, ref_pose, self.path, tag=self.tag)
+
+        # 统计误差
+        if ref_disp is not None:
+            self.gt_list.append(ref_disp)
+            err = np.linalg.norm(output[0] - ref_disp)
+            self.err_list.append(err)
+
         return ref_pose
 
     def to_csv(self, path: Path | str):
@@ -326,22 +347,6 @@ class InertialNetworkData:
         acce_block = rot.apply(acce_block)
         return np.hstack([gyro_block, acce_block]).T.reshape(self.shape)
 
-    def predict_using(self, net: InertialNetwork, ref_poses: PosesData | None = None):
-        if ref_poses is None:
-            init_pos = np.zeros(3).astype(np.float64)
-        else:
-            init_pos = ref_poses.get_pose(0).p
-
-        result = NetworkResult(net.name, init_pos, step=self.step, rate=self.rate)
-        for idx, block in self.get_block_idx():
-            ref_pose = (
-                ref_poses.get_pose(idx) if ref_poses is not None else Pose.identity()
-            )
-            net_out = net.predict(block)
-            _pose = result.add(net_out, ref_pose)
-            print(f"{net.name}-{self.bc}: {_pose.p}")
-        return result
-
     def predict_using_rot(
         self, network: InertialNetwork, ref_poses: PosesData, degrees: list = [0]
     ):
@@ -375,21 +380,26 @@ class InertialNetworkData:
         """
         results = [
             NetworkResult(
-                model.name, ref_poses.get_pose(0).p, step=self.step, rate=self.rate
+                model.name,
+                ref_poses.get_pose(0).p,
+                step=self.step,
+                rate=self.rate,
+                using_rerun=True,
             )
             for model in networks
         ]
 
         for idx, block in self.get_block_idx():
-            ref_pose = ref_poses.get_pose(idx)
-            yaw_rot = ref_pose.get_yaw_pose().rot
+            s_pose = ref_poses.get_pose(idx)
+            e_pose = ref_poses.get_pose(idx + self.rate)
+            disp = e_pose.p - s_pose.p
+            yaw_rot = s_pose.get_yaw_pose().rot
             for i, net in enumerate(networks):
                 block_rot = self.rotate_block(block, yaw_rot)
 
-                net_out = net.predict(block_rot)
-                net_out = yaw_rot.inv().apply(net_out[0]), net_out[1]
-                _pose = results[i].add(net_out, ref_pose)
-                # print(f"{net.name}-{self.bc}: {_pose.p}")
+                meas, meas_cov = net.predict(block_rot)
+                meas = yaw_rot.inv().apply(meas)
+                _pose = results[i].add((meas, meas_cov), s_pose, disp)
 
         return results
 
@@ -404,15 +414,15 @@ class DataRunner:
         has_init_rerun: bool = False,
         using_gt: bool = True,
     ):
-        self.data = ud
+        self.ud = ud
+        assert len(self.ud.gt_data) == len(self.ud.imu_data), (
+            f"GT and IMU data length mismatch: {len(self.ud.gt_data)} != {len(self.ud.imu_data)}"
+        )
         self.gt_data = ud.gt_data.get_time_range(time_range)
         self.imu_data = ud.imu_data.get_time_range(time_range)
 
         # 变换到global
         world_imu_gt = self.imu_data.transform(self.gt_data.rots if using_gt else None)
-        # world_imu_gt = world_imu_gt.transform(
-        #     Rotation.from_rotvec([0, 40, 0], degrees=True)
-        # )
         self.in_data = Data(world_imu_gt)
 
         # 获取 gt_data 的起始位置
@@ -420,24 +430,25 @@ class DataRunner:
         self.init_pose = Pose.from_transform(self.gt_data.ps[0])
 
         if not has_init_rerun:
-            rre.rerun_init(ud.name, imu_view_tags=["GT", "Raw"])
+            # rre.rerun_init(ud.name, imu_view_tags=["GT", "Raw"])
+            rre.RerunView().add_imu_view(
+                tags=["GT", "Raw"],
+            ).add_cdf_view().send(ud.name)
             rre.send_pose_data(self.gt_data, "GT", color=[192, 72, 72])
             rre.send_imu_data(self.imu_data, tag="Raw")
             rre.send_imu_data(world_imu_gt, tag="GT")
-            if self.data.has_fusion:
-                fusion_data = ud.fusion_data.get_time_range(time_range)
+
+            # 如果是ext
+            if self.ud.using_ext:
+                assert isinstance(self.ud, ExtUnitData)
+
+                fusion_data = self.ud.fusion_data.get_time_range(time_range)
                 fusion_data.ps = fusion_data.ps - fusion_data.ps[0] + self.gt_data.ps[0]
                 rre.send_pose_data(fusion_data, "Fusion")
-
-    def predict(self, net: InertialNetwork):
-        print("> Using Model:", net.name)
-        results = self.in_data.predict_using(net, self.gt_data)
-        results.to_csv(f"results/{self.data.name}/{net.name}.csv")
-
-        print(f"> Model {net.name} prediction completed.")
 
     def predict_rot(self, network: InertialNetwork, degrees: list = [0]):
         return self.in_data.predict_using_rot(network, self.gt_data, degrees)
 
     def predict_batch(self, networks: list[InertialNetwork]):
-        return self.in_data.predict_usings(networks, self.gt_data)
+        results = self.in_data.predict_usings(networks, self.gt_data)
+        return results

@@ -8,6 +8,159 @@ from numpy.typing import NDArray
 from .datatype import ImuData, Pose, PosesData
 
 
+class RerunView:
+    def __init__(self):
+        self.views = []
+
+    def add_imu_view(
+        self,
+        visible: bool = False,
+        tags: list = [],
+        range: tuple[float, float] = (-15.0, 15.0),
+    ):
+        XYZ_AXIS_NAMES = ["x", "y", "z"]
+        XYZ_AXIS_COLORS = [[(231, 76, 60), (39, 174, 96), (52, 120, 219)]]
+
+        time_range_start = rrb.TimeRangeBoundary.cursor_relative(seconds=range[0])
+        time_range_end = rrb.TimeRangeBoundary.cursor_relative(seconds=range[1])
+        gyro_views = [
+            rrb.TimeSeriesView(
+                origin=f"gyroscope_{tag}",
+                name=f"Gyroscope_{tag}",
+                overrides={
+                    # type: ignore[arg-type]
+                    f"/gyroscope_{tag}": rr.SeriesLines.from_fields(
+                        names=XYZ_AXIS_NAMES, colors=XYZ_AXIS_COLORS
+                    ),
+                },
+                axis_x=rrb.archetypes.TimeAxis(
+                    view_range=rrb.TimeRange(start=time_range_start, end=time_range_end)
+                ),
+            )
+            for tag in tags
+        ]
+        acce_views = [
+            rrb.TimeSeriesView(
+                origin=f"accelerometer_{tag}",
+                name=f"Accelerometer_{tag}",
+                overrides={
+                    # type: ignore[arg-type]
+                    f"/accelerometer_{tag}": rr.SeriesLines.from_fields(
+                        names=XYZ_AXIS_NAMES, colors=XYZ_AXIS_COLORS
+                    ),
+                },
+                axis_x=rrb.archetypes.TimeAxis(
+                    view_range=rrb.TimeRange(start=time_range_start, end=time_range_end)
+                ),
+            )
+            for tag in tags
+        ]
+
+        magn_views = [
+            rrb.TimeSeriesView(
+                origin=f"magnetometer_{tag}",
+                name=f"Magnetometer_{tag}",
+                overrides={
+                    # type: ignore[arg-type]
+                    f"/magnetometer_{tag}": rr.SeriesLines.from_fields(
+                        names=XYZ_AXIS_NAMES, colors=XYZ_AXIS_COLORS
+                    ),
+                },
+                axis_x=rrb.archetypes.TimeAxis(
+                    view_range=rrb.TimeRange(start=time_range_start, end=time_range_end)
+                ),
+            )
+            for tag in tags
+        ]
+
+        imu_view = rrb.Vertical(*gyro_views, *acce_views, *magn_views, visible=visible)
+
+        self.views.append(imu_view)
+        return self
+
+    def add_spatial_view(
+        self,
+        eye_at_entity: str = "/world/Groundtruth",
+    ):
+        spatial_view = rrb.Spatial3DView(
+            origin="/",
+            name="World position",
+            spatial_information=rrb.SpatialInformation(show_axes=True),
+            eye_controls=rrb.EyeControls3D(
+                kind="Orbital", tracking_entity=eye_at_entity
+            ),
+        )
+        self.views.append(spatial_view)
+        return self
+
+    def add_cdf_view(
+        self,
+        visible: bool = True,
+        tags: list = [],
+        error_types: list = ["ATE", "RTE"],
+        range: tuple[float, float] = (-15.0, 15.0),
+    ):
+        """
+        添加 CDF 视图，用于显示误差的累积分布函数
+
+        Args:
+            visible: 是否可见
+            tags: 数据标签列表
+            error_types: 误差类型列表，如 ['ATE', 'RTE', 'APE', 'RPE']
+            range: 时间轴范围（相对于光标）
+        """
+        # 为每个误差类型创建颜色映射
+        ERROR_TYPE_COLORS = {
+            "APE": [(231, 76, 60)],  # 红色
+            "ATE": [(39, 174, 96)],  # 绿色
+            "RPE": [(52, 120, 219)],  # 蓝色
+            "RTE": [(255, 152, 0)],  # 橙色
+        }
+
+        time_range_start = rrb.TimeRangeBoundary.cursor_relative(seconds=range[0])
+        time_range_end = rrb.TimeRangeBoundary.cursor_relative(seconds=range[1])
+
+        # 为每个 tag 和 error_type 组合创建视图
+        cdf_views = []
+        for tag in tags:
+            for error_type in error_types:
+                view_name = f"CDF_{error_type}_{tag}"
+                origin = f"cdf_{error_type}_{tag}"
+
+                # 创建时间序列视图
+                view = rrb.TimeSeriesView(
+                    origin=origin,
+                    name=view_name,
+                    overrides={
+                        origin: rr.SeriesLines.from_fields(
+                            names=["CDF"],
+                            colors=[
+                                ERROR_TYPE_COLORS.get(error_type, [(128, 128, 128)])
+                            ],
+                        ),
+                    },
+                    axis_x=rrb.archetypes.TimeAxis(
+                        view_range=rrb.TimeRange(
+                            start=time_range_start, end=time_range_end
+                        )
+                    ),
+                    visible=visible,
+                )
+                cdf_views.append(view)
+
+        if cdf_views:
+            cdf_view = rrb.Vertical(*cdf_views, visible=visible)
+            self.views.append(cdf_view)
+
+        return self
+
+    def send(self, name: str, shares: list[float] | None = []):
+        rr.init(name, spawn=True)
+        blueprint = rrb.Horizontal(*self.views, column_shares=shares)
+        rr.send_blueprint(blueprint)
+        return self
+
+
 def log_coordinate(
     entity_path: str,
     view_coordinate: rr.AsComponents = rr.ViewCoordinates.RIGHT_HAND_Z_UP,
@@ -29,94 +182,6 @@ def log_coordinate(
         ),
         static=True,
     )
-
-
-def rerun_init(
-    name: str,
-    imu_view_visible: bool = False,
-    imu_view_tags: list = [],
-    imu_view_range: tuple[float, float] = (-15.0, 15.0),
-    eye_at_entity: str = "/world/Groundtruth",
-):
-    XYZ_AXIS_NAMES = ["x", "y", "z"]
-    XYZ_AXIS_COLORS = [[(231, 76, 60), (39, 174, 96), (52, 120, 219)]]
-
-    time_range_start = rrb.TimeRangeBoundary.cursor_relative(seconds=imu_view_range[0])
-    time_range_end = rrb.TimeRangeBoundary.cursor_relative(seconds=imu_view_range[1])
-    gyro_views = [
-        rrb.TimeSeriesView(
-            origin=f"gyroscope_{tag}",
-            name=f"Gyroscope_{tag}",
-            overrides={
-                # type: ignore[arg-type]
-                f"/gyroscope_{tag}": rr.SeriesLines.from_fields(
-                    names=XYZ_AXIS_NAMES, colors=XYZ_AXIS_COLORS
-                ),
-            },
-            axis_x=rrb.archetypes.TimeAxis(
-                view_range=rrb.TimeRange(start=time_range_start, end=time_range_end)
-            ),
-        )
-        for tag in imu_view_tags
-    ]
-    acce_views = [
-        rrb.TimeSeriesView(
-            origin=f"accelerometer_{tag}",
-            name=f"Accelerometer_{tag}",
-            overrides={
-                # type: ignore[arg-type]
-                f"/accelerometer_{tag}": rr.SeriesLines.from_fields(
-                    names=XYZ_AXIS_NAMES, colors=XYZ_AXIS_COLORS
-                ),
-            },
-            axis_x=rrb.archetypes.TimeAxis(
-                view_range=rrb.TimeRange(start=time_range_start, end=time_range_end)
-            ),
-        )
-        for tag in imu_view_tags
-    ]
-
-    magn_views = [
-        rrb.TimeSeriesView(
-            origin=f"magnetometer_{tag}",
-            name=f"Magnetometer_{tag}",
-            overrides={
-                # type: ignore[arg-type]
-                f"/magnetometer_{tag}": rr.SeriesLines.from_fields(
-                    names=XYZ_AXIS_NAMES, colors=XYZ_AXIS_COLORS
-                ),
-            },
-            axis_x=rrb.archetypes.TimeAxis(
-                view_range=rrb.TimeRange(start=time_range_start, end=time_range_end)
-            ),
-        )
-        for tag in imu_view_tags
-    ]
-
-    imu_views = gyro_views + acce_views + magn_views
-
-    # 所有视图构成
-    all_views = []
-    all_views_shares = []
-    if len(imu_view_tags) > 0:
-        all_views.append(rrb.Vertical(*imu_views, visible=imu_view_visible))
-        all_views_shares.append(0.4)
-    all_views.append(
-        rrb.Spatial3DView(
-            origin="/",
-            name="World position",
-            spatial_information=rrb.SpatialInformation(show_axes=True),
-            eye_controls=rrb.EyeControls3D(
-                kind="Orbital", tracking_entity=eye_at_entity
-            ),
-        )
-    )
-    all_views_shares.append(0.6)
-
-    rr.init(name, spawn=True)
-    blueprint = rrb.Horizontal(*all_views, column_shares=all_views_shares)
-    rr.send_blueprint(blueprint)
-    rr.log("/", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
 
 
 def set_world_tf(tf: Pose):

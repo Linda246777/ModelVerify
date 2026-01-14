@@ -47,8 +47,8 @@ def main():
         # 数据
         ud = UnitData(dap.unit, using_ext=False)
         ud.imu_data = ImuData.from_csv(ud._imu_path)
-        # ud.gt_data = ud.imu_data.to_poses()
-        ud.gt_data = GroundTruthData.from_csv(ud._gt_path)
+        ud.gt_data = ud.imu_data.to_poses()
+        # ud.gt_data = GroundTruthData.from_csv(ud._gt_path)
 
         ud.has_fusion = False
         runner = DataRunner(ud, Data, time_range=time_range, using_gt=using_gt)

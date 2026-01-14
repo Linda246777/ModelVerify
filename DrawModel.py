@@ -59,7 +59,7 @@ def main():
         ud.imu_data = imu_data.interpolate(t_new_us)
 
         # 可视化
-        bre.rerun_init(ud.name)
+        bre.RerunView().add_spatial_view().send(ud.name)
         bre.send_pose_data(ud.gt_data, "Groundtruth", color=[192, 72, 72])
 
         # 模型推理
@@ -74,11 +74,11 @@ def main():
         evaluator.save(ud.base_dir / "eval.json")
 
     if dap.unit:
-        ud = UnitData(dap.unit, using_ext=False)
+        ud = UnitData(dap.unit)
         action(ud)
     elif dap.dataset:
         dataset_path = dap.dataset
-        datas = DeviceDataset(dataset_path, False)
+        datas = DeviceDataset(dataset_path)
         for ud in datas:
             action(ud)
 

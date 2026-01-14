@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
+from sophuspy import SE3
 
 from base.interpolate import get_time_series, interpolate_vector3, slerp_rotation
 from base.rtab import RTABData
@@ -45,6 +46,12 @@ class Pose:
 
     def inverse(self):
         return Pose(self.rot.inv(), -self.rot.inv().apply(self.p))
+
+    def between(self, to: Self):
+        return self.inverse().compose(to)
+
+    def log(self):
+        return SE3(self.rot.as_matrix(), self.p).log()
 
     def get_yaw_pose(self):
         yaw = self.rot.as_euler("ZXY")[0]
@@ -117,6 +124,12 @@ class PosesData:
         # t = t_glo + R_glo * t
         self.rots = tf.rot * self.rots
         self.ps = tf.p + tf.rot.apply(self.ps)
+
+    def get_between(self, s: int, e: int) -> Pose:
+        s_pose = self.get_pose(s)
+        e_pose = self.get_pose(e)
+        rel_pose = s_pose.between(e_pose)
+        return rel_pose
 
     def reset_start(self):
         """重置出发点"""
@@ -346,27 +359,52 @@ class UnitData:
     imu_data: ImuData
     gt_data: PosesData
     opt_data: PosesData
-    fusion_data: PosesData
-    check_data: DataCheck
-    calib_data: CalibrationData
 
-    def __init__(self, base_dir: Path | str, using_ext: int = True):
-        base_dir = Path(base_dir)
-        self.name = base_dir.name
-        self.base_dir = base_dir
+    has_opt: bool
+    using_ext: bool = False
+
+    def __init__(self, base_dir: Path | str):
+        self.base_dir = Path(base_dir)
+        self.name = self.base_dir.name
 
         # 设备名称
         spl = self.name.split("_")
         device_name = spl[2] if len(spl) > 2 else "default"
-        self.device_name = device_name  # type: ignore
+        self.device_name = device_name
 
-        self._imu_path = base_dir / "imu.csv"
-        self._cam_path = base_dir / "cam.csv"
-        self._gt_path = base_dir / "gt.csv"
-        self._opt_path = base_dir / "opt.csv"
+        self._imu_path = self.base_dir / "imu.csv"
+        self._cam_path = self.base_dir / "cam.csv"
+        self._gt_path = self.base_dir / "gt.csv"
+        self._opt_path = self.base_dir / "opt.csv"
+
+        self.has_opt = self._opt_path.exists()
+
+    def load_data(self, using_opt=False):
+        self.imu_data = ImuData.from_csv(self._imu_path)
+        self.gt_data = GroundTruthData.from_csv(self._gt_path)
+        if self.has_opt:
+            self.opt_data = GroundTruthData.from_csv(self._opt_path)
+            if using_opt:
+                self.gt_data = self.opt_data
+
+        if len(self.imu_data) != len(self.gt_data):
+            print("! imu and gt data length not match")
+
+
+class ExtUnitData(UnitData):
+    imu_data: ImuData
+    gt_data: PosesData
+    opt_data: PosesData
+    fusion_data: PosesData
+    check_data: DataCheck
+    calib_data: CalibrationData
+
+    def __init__(self, base_dir: Path | str, using_ext: bool = True):
+        super().__init__(base_dir)
+        self.using_ext = using_ext
 
         # 读取真值
-        db_file = RTABData.get_db_file(base_dir)
+        db_file = RTABData.get_db_file(self.base_dir)
         if db_file is not None:
             # 两种文件均不存在
             rtab_data = RTABData(db_file)
@@ -375,26 +413,24 @@ class UnitData:
             rtab_data.save_csv(self._gt_path)
             rtab_data.save_csv(self._opt_path, using_opt=True)
 
-        self._fusion_path = base_dir / "fusion.csv"
+        self._fusion_path = self.base_dir / "fusion.csv"
         self.has_fusion = self._fusion_path.exists()
 
         # 读取标定数据
         if using_ext:
-            self._calib_file = base_dir / "Calibration.json"
-            self._check_file = base_dir / "DataCheck.json"
-            self.load_data()
+            self._calib_file = self.base_dir / "Calibration.json"
+            self._check_file = self.base_dir / "DataCheck.json"
 
-    def load_data(self):
-        imu_data = ImuData.from_csv(self._imu_path)
-        gt_data = GroundTruthData.from_csv(self._gt_path)
-        opt_data = GroundTruthData.from_csv(self._opt_path)
+    def load_data(self, using_opt=False):
+        super().load_data(using_opt)
+
         if self.has_fusion:
             fusion_data = FusionData.from_csv(self._fusion_path)
             self.fusion_data = fusion_data
 
-        self.correct(gt_data, imu_data)
+        self.correct(self.gt_data, self.imu_data)
 
-    def correct(self, gt_data: GroundTruthData, imu_data: ImuData):
+    def correct(self, gt_data: PosesData, imu_data: ImuData):
         self.calib_data = CalibrationData.from_json(self._calib_file)
         self.check_data = DataCheck.from_json(self._check_file)
         # 时间修正
@@ -402,7 +438,7 @@ class UnitData:
         # 空间变换
         gt_data.transform_local(self.calib_data.tf_sg_local.inverse())
         # gt_data.transform_global(self.calib_data.tf_sg_global)
-        gt_data.transform_global(gt_data.get_pose(0).get_yaw_pose().inverse())
+        # gt_data.transform_global(gt_data.get_pose(0).get_yaw_pose().inverse())
 
         # 数据对齐
         t_new_us = get_time_series([imu_data.t_us, gt_data.t_us])
@@ -411,13 +447,11 @@ class UnitData:
 
 
 class DeviceDataset:
-    def __init__(self, base_dir: Path | str, using_ext: bool = True):
+    def __init__(self, base_dir: Path | str):
         self.base_dir = Path(base_dir)
         self.device_name = self.base_dir.name
         self.units = [
-            UnitData(path, using_ext)
-            for path in self.base_dir.iterdir()
-            if path.is_dir()
+            UnitData(path) for path in self.base_dir.iterdir() if path.is_dir()
         ]
 
     def __getitem__(self, index):

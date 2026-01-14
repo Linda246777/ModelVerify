@@ -140,7 +140,7 @@ def main():
         evaluator.save(ud.base_dir / "eval.json")
 
     if dap.unit:
-        ud = UnitData(dap.unit, using_ext=False)
+        ud = UnitData(dap.unit)
         action(ud)
     elif dap.dataset:
         dataset_path = dap.dataset
