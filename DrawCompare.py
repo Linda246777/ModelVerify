@@ -144,7 +144,7 @@ def main():
         action(ud)
     elif dap.dataset:
         dataset_path = dap.dataset
-        datas = DeviceDataset(dataset_path, False)
+        datas = DeviceDataset(dataset_path)
         for ud in datas:
             action(ud)
     else:

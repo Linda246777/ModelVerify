@@ -39,12 +39,12 @@ class TLIOData:
 
 def tlio_view(path: str | Path, net: InertialNetwork):
     td = TLIOData(path)
-    rre.rerun_init(td.name, imu_view_tags=["Groundtruth"])
+    rre.RerunView().add_imu_view(tags=["Groundtruth"]).add_spatial_view().send(td.name)
     rre.send_pose_data(td.gt_data, "Groundtruth")
     rre.send_imu_data(td.imu_data, tag="Groundtruth")
 
     in_data = InertialNetworkData(td.imu_data)
-    in_data.predict_using(net, td.gt_data)
+    in_data.predict_usings([net], td.gt_data)
 
 
 if __name__ == "__main__":

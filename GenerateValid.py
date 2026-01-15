@@ -4,24 +4,24 @@
 
 功能说明:
     该脚本用于从原始数据集中生成经过预处理的验证数据集。主要功能包括:
-    
+
     1. 数据加载与同步:
        - 从原始CSV文件加载IMU、相机、Ground Truth(GT)和优化轨迹(OPT)数据
        - 计算各数据源的共同时间窗口，并进行插值对齐
        - 通过时间匹配算法校准GT数据与IMU数据的时间戳
-    
+
     2. 数据标准化:
        - 将所有数据插值到统一的时间序列
        - 重置时间起点，使数据从t=0开始
        - 输出时间校准偏移量
-    
+
     3. 数据保存:
        - 保存处理后的IMU数据 (imu.csv)
        - 保存Ground Truth轨迹 (gt.csv)
        - 保存优化轨迹 (opt.csv)
        - 保存相机数据 (cam.csv)
        - 生成GT与OPT的2D轨迹对比图 (gt.png)
-    
+
     4. 支持两种运行模式:
        - 单元模式: 处理指定的单个数据单元
        - 数据集模式: 批量处理整个数据集目录下的所有数据单元
@@ -29,10 +29,10 @@
 使用示例:
     # 处理单个单元
     python GenerateValid.py --unit <unit_path> --output <output_dir>
-    
+
     # 批量处理数据集
     python GenerateValid.py --dataset <dataset_path> --output <output_dir>
-    
+
     # 指定模型 (参数已定义但当前未使用)
     python GenerateValid.py --models model1 model2 --models_path <models_dir>
 
@@ -126,7 +126,7 @@ def main():
         print("保存成功: ", png_path)
 
     if dap.unit:
-        ud = UnitData(dap.unit, using_ext=False)
+        ud = UnitData(dap.unit)
         action(ud)
     elif dap.dataset:
         dataset_path = Path(dap.dataset)
@@ -136,7 +136,7 @@ def main():
             units = [unit for unit in dir.iterdir() if unit.is_dir()]
             for unit in units:
                 print(f"处理单元：{unit}")
-                ud = UnitData(unit, using_ext=False)
+                ud = UnitData(unit)
                 action(ud)
 
 
