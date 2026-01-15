@@ -28,9 +28,9 @@ from typing import Any, Dict, List
 
 # 配置
 RESULTS_PATH = Path("results")
-DATASETS_PATH = [
-    Path("~/Resources/VaildVersion2/ABR-AL60").expanduser(),
-    Path("~/Resources/VaildVersion2/Redmi-K30-Pro").expanduser(),
+DATASETS = [
+    "~/Resources/VaildVersion2/ABR-AL60",
+    "~/Resources/VaildVersion2/Redmi-K30-Pro",
 ]
 MODELS_PATH = Path("models")
 
@@ -41,6 +41,8 @@ AVAILABLE_MODELS = [
     "model_imot_0111_64",
     "model_resnet_0111_96",
 ]
+
+DATASETS_PATH = [Path(p).expanduser() for p in DATASETS]
 
 
 def run_validation(

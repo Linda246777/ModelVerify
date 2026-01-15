@@ -1,46 +1,23 @@
 #!/usr/bin/env python3
 """
-验证模型效果
+分析数据集成分
 
-验证单个模型在数据集上的效果，生成CDF图和ATE/APE/RPE等评估指标。
 
-用法:
-    # 验证单个数据单元
-    python VaildModel.py -u <unit_path> -m model_name
-
-    # 验证整个数据集
-    python VaildModel.py -d <dataset_path> -m model_name
-
-    # 指定模型文件夹
-    python VaildModel.py -u <unit_path> -m model_name --models_path /path/to/models
-
-参数:
-    -u, --unit: 指定单个数据单元路径
-    -d, --dataset: 指定数据集路径
-    -m, --models: 指定模型文件名（支持多个）
-    --models_path: 指定模型文件夹路径（默认为"models"）
-
-输出:
-    - results/<model_name>/<unit_name>/: 单个单元的结果目录
-      - CDF.png: 误差累积分布函数图
-      - Eval.json: 评估指标（ATE/APE/RPE）
-    - results/<model_name>_<device_name>/: 数据集结果目录
-      - CDF.png: 整体误差CDF图
-    - results/<model_name>/temp/: 临时结果缓存
 """
 
 import pickle
 from pathlib import Path
 
 import base.rerun_ext as bre
+from base.analysis import DatasetAnalysis, UnitAnalysis
 from base.args_parser import DatasetArgsParser
 from base.datatype import DeviceDataset, UnitData
 from base.draw.CDF import plot_one_cdf
 from base.evaluate import Evaluation
-from base.model import DataRunner, InertialNetworkData, ModelLoader, NetworkResult
+from base.model import DataRunner, InertialNetworkData, ModelLoader
 
 # 默认结果输出路径
-EvalDir = Path("results")
+EvalDir = Path("/Users/qi/Resources/results")
 
 
 def main():
@@ -69,6 +46,7 @@ def main():
         unit_out_dir.mkdir(parents=True, exist_ok=True)
 
         obj_path = res_dir / "temp" / f"action_{ud.name}.pkl"
+        print(f"> 存储路径：{obj_path}")
         obj_path.parent.mkdir(parents=True, exist_ok=True)
         # 如果已经计算过
         if obj_path.exists():
@@ -101,7 +79,14 @@ def main():
         plot_one_cdf(model_cdf, unit_out_dir / "CDF.png", show=False)
 
         evaluator.save(unit_out_dir / "Eval.json")
-        return netres, evaluator
+
+        # 分析数据集
+
+        ua = UnitAnalysis(ud.name, netres[0].gt_list)
+
+        ua.analyze(res_dir / ud.name)
+
+        return ua
 
     if dap.unit:
         unit_path = Path(dap.unit)
@@ -110,7 +95,7 @@ def main():
         res_dir.mkdir(parents=True, exist_ok=True)
 
         ud = UnitData(unit_path)
-        netres, evaluator = action(ud, res_dir)
+        action(ud, res_dir)
 
     elif dap.dataset:
         dataset_path = Path(dap.dataset)
@@ -119,20 +104,18 @@ def main():
         res_dir = EvalDir / f"{nets[0].name}_{datas.device_name}"
         res_dir.mkdir(parents=True, exist_ok=True)
         # 存储结果
-        netres_list: list[NetworkResult] = []
-        for ud in datas:
-            netres, evaluator = action(ud, res_dir)
-            netres_list.extend(netres)
+        da_path = res_dir / f"{DatasetAnalysis._obj_name}.pkl"
 
-        # 合并所有netres的误差项
-        all_errors = []
-        for netres in netres_list:
-            assert isinstance(netres, NetworkResult)
-            all_errors.extend(netres.err_list)
+        if da_path.exists():
+            da = DatasetAnalysis.load(da_path)
+        else:
+            da = DatasetAnalysis()
+            for ud in datas:
+                ua = action(ud, res_dir)
+                da.add(ua)
+            da.save(res_dir / f"{da._obj_name}.pkl")
 
-        # 绘制总体的结果
-        model_cdf = Evaluation.get_cdf(all_errors, nets[0].name)
-        plot_one_cdf(model_cdf, res_dir / "CDF.png", show=False)
+        da.analyze(res_dir, datas.device_name)
 
 
 if __name__ == "__main__":

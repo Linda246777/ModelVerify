@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import TypeAlias
 
 import numpy as np
-import pandas as pd
 import torch
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
@@ -150,10 +149,9 @@ class NetworkResult:
     meas_list: list[NDArray]
     meas_cov_list: list[NDArray]
 
-    gt_list: list[NDArray]  # 真值
+    gt_list: list[NDArray]  # 20Hz速度列表 rate / step
     err_list: list  # 误差
 
-    t_us: list[int]
     pose: Pose
     pose_list: list[Pose]  # 位置结果
 
@@ -209,13 +207,14 @@ class NetworkResult:
         self.meas_cov_list.append(output[1])
 
         self.positon += output[0] * self.interval_us / 1e6
-        ref_pose.p = self.positon
+        pose = ref_pose.copy()
+        pose.p = self.positon.copy()
 
-        self.pose_list.append(ref_pose.copy())
-        self.path.append(ref_pose.p.copy())
+        self.pose_list.append(pose)
+        self.path.append(pose.p)
 
         if self.using_rerun and ref_pose.t_us > 0:
-            rre.log_network_pose(ref_pose.t_us, ref_pose, self.path, tag=self.tag)
+            rre.log_network_pose(ref_pose.t_us, pose, self.path, tag=self.tag)
 
         # 统计误差
         if ref_disp is not None:
@@ -224,35 +223,6 @@ class NetworkResult:
             self.err_list.append(err)
 
         return ref_pose
-
-    def to_csv(self, path: Path | str):
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        headers = [
-            "#timestamp [us]",
-            "p_RS_R_x [m]",
-            "p_RS_R_y [m]",
-            "p_RS_R_z [m]",
-            "q_RS_w []",
-            "q_RS_x []",
-            "q_RS_y []",
-            "q_RS_z []",
-            "cov_x []",
-            "cov_y []",
-            "cov_z []",
-        ]
-
-        t_us = np.array(self.t_us[1:]).reshape(-1, 1)
-        cov_arr = np.array(self.meas_cov_list)
-        ps = np.array([pose.p for pose in self.pose_list])
-        qs = np.array([pose.rot.as_quat(scalar_first=True) for pose in self.pose_list])
-        assert len(t_us) == len(ps) == len(qs) == len(cov_arr), (
-            f"Length mismatch: {t_us.shape}, {ps.shape}, {qs.shape}, {cov_arr.shape}"
-        )
-        data = np.hstack([t_us, ps, qs, cov_arr])
-        pd.DataFrame(data, columns=headers).to_csv(  # type: ignore
-            path, index=False, float_format="%.8f"
-        )
 
 
 class InertialNetworkData:
