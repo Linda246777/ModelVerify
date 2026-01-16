@@ -47,6 +47,7 @@ def main():
     dap = DatasetArgsParser()
     dap.parser.add_argument("-m", "--models", nargs="+", help="模型")
     dap.parser.add_argument("--models_path", type=str, help="模型文件夹")
+    dap.parser.add_argument("-c", "--config", type=str, help="配置文件")
     dap.parse()
 
     # regen_fusion = dap.regen
@@ -80,13 +81,16 @@ def main():
         else:
             # 加载数据
             ud.load_data(using_opt=True)
+            if dap.args.config:
+                print(f"> 加载配置文件：{dap.args.config}")
+                ud.imu_data.calibrate_with(dap.args.config)
+
             # 可视化
             bre.RerunView().add_spatial_view().send(ud.name)
             bre.send_pose_data(ud.gt_data, "Groundtruth", color=[192, 72, 72])
 
             # 模型推理
             dr = DataRunner(ud, Data, has_init_rerun=True)
-            dr.test_scale = True
             nr_list = dr.predict_batch(nets)
 
             # 计算 ATE
@@ -118,7 +122,7 @@ def main():
         dataset_path = Path(dap.dataset)
         datas = DeviceDataset(dataset_path)
         # 使用 网络名称 + 设备名称
-        res_dir = EvalDir / f"{nets[0].name}_{datas.device_name}_scale"
+        res_dir = EvalDir / f"{nets[0].name}_{datas.device_name}_calib"
         res_dir.mkdir(parents=True, exist_ok=True)
         # 存储结果
         netres_list: list[NetworkResult] = []

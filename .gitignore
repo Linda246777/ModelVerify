@@ -15,6 +15,7 @@ wheels/
 # Directory
 datasets/
 results/
+/configs
 .DS_Store
 /Models
 

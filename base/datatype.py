@@ -5,6 +5,7 @@ from typing import Literal, Self, TypeAlias
 
 import numpy as np
 import pandas as pd
+import yaml
 from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation
 from sophuspy import SE3
@@ -242,6 +243,39 @@ class ImuData:
     def to_poses(self) -> PosesData:
         ps = np.zeros((len(self.t_us), 3))
         return PosesData(self.t_us, self.ahrs, ps)
+
+    def calibrate_with(self, config_path: Path):
+        imu_calib = ImuCalibration(config_path)
+
+        self.acce = imu_calib.ra.apply(self.acce) - imu_calib.ba
+        self.gyro = imu_calib.rg.apply(self.gyro) - imu_calib.bg
+
+
+class ImuCalibration:
+    def __init__(self, config_path: Path):
+        self.ra = Rotation.identity()
+        self.rg = Rotation.identity()
+        self.ba = np.zeros(3)
+        self.bg = np.zeros(3)
+
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+            if "Calibration" in config:
+                calib = config["Calibration"]
+                ra_arr = np.array(calib["ra"]).reshape((3, 3))
+                rg_arr = np.array(calib["rg"]).reshape((3, 3))
+                self.ra = Rotation.from_matrix(ra_arr)
+                self.rg = Rotation.from_matrix(rg_arr)
+                self.ba = np.array(calib["ba"])
+                self.bg = np.array(calib["bg"])
+
+    def calibrate(self, imu_data: ImuData):
+        imu_data.acce = self.ra.apply(imu_data.acce) - self.ba
+        imu_data.gyro = self.rg.apply(imu_data.gyro) - self.bg
+        return imu_data
+
+    def __repr__(self):
+        return f"ImuCalibration(Ra={self.ra}, Rg={self.rg}, Ba={self.ba}, Bg={self.bg})"
 
 
 class GroundTruthData(PosesData):
