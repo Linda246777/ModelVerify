@@ -344,7 +344,13 @@ class InertialNetworkData:
                 print(f"{network.name}_{deg}-{idx}: {_pose.p}")
         return results
 
-    def predict_usings(self, networks: list[InertialNetwork], ref_poses: PosesData):
+    def predict_usings(
+        self,
+        networks: list[InertialNetwork],
+        ref_poses: PosesData,
+        test_scale: bool = False,
+        test_heading: bool = False,
+    ):
         """
         批量预测是否
         """
@@ -370,6 +376,11 @@ class InertialNetworkData:
                 meas, meas_cov = net.predict(block_rot)
                 meas = yaw_rot.inv().apply(meas)
                 meas_cov = yaw_rot.inv().apply(meas_cov)
+
+                if test_scale:
+                    meas = np.linalg.norm(meas) * disp / np.linalg.norm(disp)
+                if test_heading:
+                    meas = np.linalg.norm(disp) * meas / np.linalg.norm(meas)
                 _pose = results[i].add((meas, meas_cov), s_pose, disp)
 
         return results

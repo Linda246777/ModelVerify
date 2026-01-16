@@ -12,7 +12,6 @@ import numpy as np
 from scipy.stats import pearsonr
 
 import base.rerun_ext as bre
-from base.analysis.dataset_analysis import DatasetAnalysis
 from base.args_parser import DatasetArgsParser
 from base.datatype import DeviceDataset, UnitData
 from base.evaluate import Evaluation
@@ -20,7 +19,7 @@ from base.model import DataRunner, InertialNetworkData, ModelLoader, NetworkResu
 from base.obj import Obj
 
 # 默认结果输出路径
-EvalDir = Path("results")
+EvalDir = Path("/Users/qi/Resources/results")
 
 
 class NetworkResultAnalysis:
@@ -72,8 +71,8 @@ class NetworkResultAnalysis:
             ax.set_xlabel(f"{ax_label} Error")
             ax.set_ylabel(f"{ax_label} Covariance (Variance)")
             ax.set_title(f"{ax_label}: Error vs Covariance")
-            ax.set_xlim(-1, 1)
-            ax.set_ylim(0, 0.3)
+            ax.set_xlim(-1.05, 1.05)
+            ax.set_ylim(-0.01, 0.31)
             ax.grid(True, alpha=0.3)
 
             # Calculate correlation
@@ -158,8 +157,8 @@ def main():
         # 如果已经计算过
         if obj_path.exists():
             print(f"> 已存在结果：{obj_path}")
-            netres, evaluator = Obj.load(obj_path)
-            assert isinstance(netres, list)
+            nr_list, evaluator = Obj.load(obj_path)
+            assert isinstance(nr_list, list)
             assert isinstance(evaluator, Evaluation)
         else:
             # 加载数据
@@ -169,22 +168,21 @@ def main():
             bre.send_pose_data(ud.gt_data, "Groundtruth", color=[192, 72, 72])
 
             # 模型推理
-            netres = DataRunner(ud, Data, has_init_rerun=True).predict_batch(nets)
+            nr_list = DataRunner(ud, Data, has_init_rerun=True).predict_batch(nets)
 
             # 计算 ATE
             evaluator = Evaluation(ud.gt_data, name=ud.name, rel_duration=1)
-            evaluator.get_eval(netres[0].poses, f"{nets[0].name}_{ud.name}")
+            evaluator.get_eval(nr_list[0].poses, f"{nets[0].name}_{ud.name}")
             evaluator.print()
 
             # 保存结果
-            Obj.save((netres, evaluator), obj_path)
+            Obj.save((nr_list, evaluator), obj_path)
 
-        nr = netres[0]
+        nr = nr_list[0]
         # 分析
-        nra = NetworkResultAnalysis(nr)
-        nra.analyze_uc_err()
-
-        return
+        # nra = NetworkResultAnalysis(nr)
+        # nra.analyze_uc_err()
+        return nr
 
     if dap.unit:
         unit_path = Path(dap.unit)
@@ -202,17 +200,18 @@ def main():
         res_dir = EvalDir / f"{nets[0].name}_{datas.device_name}"
         res_dir.mkdir(parents=True, exist_ok=True)
         # 存储结果
-        da_path = res_dir / f"{DatasetAnalysis._obj_name}.pkl"
+        # da_path = res_dir / f"{DatasetAnalysis._obj_name}.pkl"
 
-        if da_path.exists():
-            da = DatasetAnalysis.load(da_path)
-        else:
-            da = DatasetAnalysis()
-            for ud in datas:
-                action(ud, res_dir)
-            da.save(res_dir / f"{da._obj_name}.pkl")
+        all_nr = NetworkResult()
 
-        da.analyze(res_dir, datas.device_name)
+        for ud in datas:
+            nr = action(ud, res_dir)
+            all_nr.meas_cov_list.extend(nr.meas_cov_list)
+            all_nr.gt_list.extend(nr.gt_list)
+            all_nr.meas_list.extend(nr.meas_list)
+
+        nra = NetworkResultAnalysis(all_nr)
+        nra.analyze_uc_err()
 
 
 if __name__ == "__main__":

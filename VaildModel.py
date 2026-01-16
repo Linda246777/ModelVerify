@@ -40,7 +40,7 @@ from base.evaluate import Evaluation
 from base.model import DataRunner, InertialNetworkData, ModelLoader, NetworkResult
 
 # 默认结果输出路径
-EvalDir = Path("results")
+EvalDir = Path("/Users/qi/Resources/results")
 
 
 def main():
