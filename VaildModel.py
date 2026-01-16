@@ -40,7 +40,7 @@ from base.evaluate import Evaluation
 from base.model import DataRunner, InertialNetworkData, ModelLoader, NetworkResult
 
 # 默认结果输出路径
-EvalDir = Path("/Users/qi/Resources/results")
+EvalDir = Path("results")
 
 
 def main():
@@ -74,8 +74,8 @@ def main():
         if obj_path.exists():
             print(f"> 已存在结果：{obj_path}")
             with open(obj_path, "rb") as f:
-                netres, evaluator = pickle.load(f)
-                assert isinstance(netres, list)
+                nr_list, evaluator = pickle.load(f)
+                assert isinstance(nr_list, list)
                 assert isinstance(evaluator, Evaluation)
         else:
             # 加载数据
@@ -85,23 +85,25 @@ def main():
             bre.send_pose_data(ud.gt_data, "Groundtruth", color=[192, 72, 72])
 
             # 模型推理
-            netres = DataRunner(ud, Data, has_init_rerun=True).predict_batch(nets)
+            dr = DataRunner(ud, Data, has_init_rerun=True)
+            dr.test_scale = True
+            nr_list = dr.predict_batch(nets)
 
             # 计算 ATE
             evaluator = Evaluation(ud.gt_data, name=ud.name, rel_duration=1)
-            evaluator.get_eval(netres[0].poses, f"{nets[0].name}_{ud.name}")
+            evaluator.get_eval(nr_list[0].poses, f"{nets[0].name}_{ud.name}")
             evaluator.print()
 
             # 保存结果
             with open(obj_path, "wb") as f:
-                pickle.dump((netres, evaluator), f)
+                pickle.dump((nr_list, evaluator), f)
 
         # 绘制 CDF
-        model_cdf = Evaluation.get_cdf(netres[0].err_list, nets[0].name)
+        model_cdf = Evaluation.get_cdf(nr_list[0].err_list, nets[0].name)
         plot_one_cdf(model_cdf, unit_out_dir / "CDF.png", show=False)
 
         evaluator.save(unit_out_dir / "Eval.json")
-        return netres, evaluator
+        return nr_list, evaluator
 
     if dap.unit:
         unit_path = Path(dap.unit)
@@ -116,7 +118,7 @@ def main():
         dataset_path = Path(dap.dataset)
         datas = DeviceDataset(dataset_path)
         # 使用 网络名称 + 设备名称
-        res_dir = EvalDir / f"{nets[0].name}_{datas.device_name}"
+        res_dir = EvalDir / f"{nets[0].name}_{datas.device_name}_scale"
         res_dir.mkdir(parents=True, exist_ok=True)
         # 存储结果
         netres_list: list[NetworkResult] = []

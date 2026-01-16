@@ -387,6 +387,11 @@ class InertialNetworkData:
 
 
 class DataRunner:
+    # 保持尺度不变，真值方向
+    test_scale: bool = False
+    # 保持方向不变，真值尺度
+    test_heading: bool = False
+
     def __init__(
         self,
         ud: UnitData,
@@ -432,5 +437,10 @@ class DataRunner:
         return self.in_data.predict_using_rot(network, self.gt_data, degrees)
 
     def predict_batch(self, networks: list[InertialNetwork]):
-        results = self.in_data.predict_usings(networks, self.gt_data)
+        results = self.in_data.predict_usings(
+            networks,
+            self.gt_data,
+            self.test_scale,
+            self.test_heading,
+        )
         return results
