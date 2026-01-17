@@ -4,36 +4,30 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 
+from . import Base2D
 
-class BarData:
-    x: NDArray
-    y: NDArray
-    x_label: str
-    y_label: str
 
-    title: str
-
+class Bar(Base2D):
     def __init__(
         self,
         y: NDArray | list[float],
         x_label: str,
         y_label: str,
-        x: NDArray | None = None,
+        x: NDArray | list[float] | None = None,
         title: str = "",
     ):
         if x is None:
-            self.x = np.arange(len(y))
+            x = np.arange(len(y))
         else:
-            self.x = x
+            x = np.array(x)
 
-        self.y = np.array(y)
-        self.x_label = x_label
-        self.y_label = y_label
-        self.title = title
+        y = np.array(y)
+
+        super().__init__(x, y, x_label, y_label, title)
 
     @staticmethod
     def from_dict(data: dict):
-        return BarData(
+        return Bar(
             x=data["x"],
             y=data["y"],
             x_label=data["x_label"],
@@ -44,6 +38,7 @@ class BarData:
     def draw(
         self,
         save_dir: Path | None = None,
+        show: bool = True,
     ):
         """绘制柱状图,并标注平均值和中位数的虚线"""
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -92,11 +87,4 @@ class BarData:
         ax.set_title(self.title)
         ax.legend()
 
-        plt.tight_layout()
-
-        if save_dir:
-            save_path = save_dir / f"{self.title.replace(' ', '_')}.png"
-            plt.savefig(save_path, dpi=300)
-            print(f"Saved to {save_path}")
-
-        plt.show()
+        return fig

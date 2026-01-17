@@ -29,19 +29,24 @@
     - results/<model_name>/temp/: 临时结果缓存
 """
 
-import pickle
 from pathlib import Path
+
+import numpy as np
+from scipy.spatial.transform import Rotation
 
 import base.rerun_ext as bre
 from base.args_parser import DatasetArgsParser
 from base.datatype import DeviceDataset, UnitData
-from base.draw.Bar import BarData
+from base.draw.Bar import Bar
 from base.draw.CDF import plot_one_cdf
+from base.draw.Scatter import Scatter
 from base.evaluate import Evaluation
 from base.model import DataRunner, InertialNetworkData, ModelLoader, NetworkResult
+from base.obj import Obj
+from base.utils import angle_between_vectors, angle_with_x_axis
 
 # 默认结果输出路径
-EvalDir = Path("results")
+EvalDir = Path("/Users/qi/Resources/results")
 
 
 def main():
@@ -64,6 +69,8 @@ def main():
     Data = InertialNetworkData.set_step(20)
     nets = loader.get_by_names(model_names)
 
+    fix_rot = Rotation.from_rotvec([0, 0, 8.11], degrees=True)
+
     def action(ud: UnitData, res_dir: Path):
         print(f"> Eval {ud.name}")
         # 数据保存路径
@@ -74,11 +81,11 @@ def main():
         obj_path.parent.mkdir(parents=True, exist_ok=True)
         # 如果已经计算过
         if obj_path.exists() and not Data.using_rerun:
-            print(f"> 已存在结果：{obj_path}")
-            with open(obj_path, "rb") as f:
-                nr_list, evaluator = pickle.load(f)
-                assert isinstance(nr_list, list)
-                assert isinstance(evaluator, Evaluation)
+            nr_list, evaluator = Obj.load(obj_path)
+            assert isinstance(nr_list, list)
+            assert isinstance(evaluator, Evaluation)
+
+            nr = nr_list[0]
         else:
             # 加载数据
             ud.load_data(using_opt=True)
@@ -95,29 +102,29 @@ def main():
             # 模型推理
             dr = DataRunner(ud, Data, has_init_rerun=True)
             nr_list = dr.predict_batch(nets)
+            nr = nr_list[0]
 
             # 计算 ATE
             evaluator = Evaluation(ud.gt_data, name=ud.name, rel_duration=1)
             evaluator.get_eval(nr_list[0].poses, f"{nets[0].name}_{ud.name}")
-            evaluator.print()
+            evaluator.save(unit_out_dir / "Eval.json")
 
             # 保存结果
-            with open(obj_path, "wb") as f:
-                pickle.dump((nr_list, evaluator), f)
+            Obj.save((nr_list, evaluator), obj_path)
 
-        # 绘制 CDF
-        model_cdf = Evaluation.get_cdf(nr_list[0].err_list, nets[0].name)
-        plot_one_cdf(model_cdf, unit_out_dir / "CDF.png", show=False)
+            # 绘制 CDF
+            model_cdf = Evaluation.get_cdf(nr.err_list, nets[0].name)
+            plot_one_cdf(model_cdf, unit_out_dir / "CDF.png", show=False)
 
-        BarData(
-            x=None,
-            y=nr_list[0].eval_t_list,
-            x_label="Cnt",
-            y_label="Time(s)",
-            title=f"Inference Latency with {nr_list[0].network_device_name}",
-        ).draw(unit_out_dir)
+        if "eval_t_list" in nr.__dict__:
+            Bar(
+                x=None,
+                y=nr.eval_t_list,
+                x_label="Cnt",
+                y_label="Time(s)",
+                title=f"Inference Latency with {nr_list[0].network_device_name}",
+            ).draw(unit_out_dir, show=False)
 
-        evaluator.save(unit_out_dir / "Eval.json")
         return nr_list, evaluator
 
     if dap.unit:
@@ -127,29 +134,84 @@ def main():
         res_dir.mkdir(parents=True, exist_ok=True)
 
         ud = UnitData(unit_path)
-        netres, evaluator = action(ud, res_dir)
+        nr_list, evaluator = action(ud, res_dir)
+
+        nr = nr_list[0]
+        # 单位是-180~180度数，遵循右手螺旋定律
+        angle_list = []
+        angle_error_list = []
+
+        for meas, gt in zip(nr.meas_list, nr.gt_list):
+            angle = angle_with_x_axis(gt)
+            angle_error = angle_between_vectors(meas, gt)
+            angle_list.append(angle)
+            angle_error_list.append(angle_error)
+
+        # 角度分析
+        Scatter(
+            x=angle_list,
+            y=angle_error_list,
+            title="Angle Error",
+            x_label="Angle",
+            y_label="Error",
+        ).show()
+        mean_angle_error = np.mean(angle_error_list)
+        print(f"Mean Angle Error: {mean_angle_error:.2f} degrees")
 
     elif dap.dataset:
+        Data = Data.no_rerun()
         dataset_path = Path(dap.dataset)
         datas = DeviceDataset(dataset_path)
         # 使用 网络名称 + 设备名称
-        res_dir = EvalDir / f"{nets[0].name}_{datas.device_name}_rotate"
+        res_dir = EvalDir / f"{nets[0].name}_{datas.device_name}"
         res_dir.mkdir(parents=True, exist_ok=True)
         # 存储结果
         netres_list: list[NetworkResult] = []
+
+        # 单位是-180~180度数，遵循右手螺旋定律
+        angle_list = []
+        angle_error_list = []
+
         for ud in datas:
-            netres, evaluator = action(ud, res_dir)
-            netres_list.extend(netres)
+            nr_list, evaluator = action(ud, res_dir)
+            netres_list.extend(nr_list)
+            nr = nr_list[0]
+
+            for meas, gt in zip(nr.meas_list, nr.gt_list):
+                meas = fix_rot.apply(meas)
+                angle = angle_with_x_axis(gt)
+                angle_error = angle_between_vectors(meas, gt)
+
+                if abs(angle_error) < 45:
+                    angle_list.append(angle)
+                    angle_error_list.append(angle_error)
+
+        # 角度分析
+        mean_angle_error = np.mean(angle_error_list)
+        print(f"Mean Angle Error: {mean_angle_error:.2f} degrees")
+        Scatter(
+            x=angle_list,
+            y=angle_error_list,
+            title="Angle Error",
+            x_label="Angle",
+            y_label="Error",
+        ).show().save(res_dir)
 
         # 合并所有netres的误差项
         all_errors = []
-        for netres in netres_list:
-            assert isinstance(netres, NetworkResult)
-            all_errors.extend(netres.err_list)
+        for nr in netres_list:
+            assert isinstance(nr, NetworkResult)
+            meas = np.array(nr.meas_list)
+            meas = fix_rot.apply(meas)
+
+            gt = np.array(nr.gt_list)
+            err = meas - gt
+            err_norm = np.linalg.norm(err, axis=1)
+            all_errors.extend(err_norm)
 
         # 绘制总体的结果
         model_cdf = Evaluation.get_cdf(all_errors, nets[0].name)
-        plot_one_cdf(model_cdf, res_dir / "CDF.png", show=False)
+        plot_one_cdf(model_cdf, res_dir / "_CDF.png", show=True)
 
 
 if __name__ == "__main__":

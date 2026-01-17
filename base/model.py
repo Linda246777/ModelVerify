@@ -440,6 +440,9 @@ class InertialNetworkData:
                 if test_heading:
                     meas = np.linalg.norm(disp) * meas / np.linalg.norm(meas)
 
+                # fix_rot = Rotation.from_rotvec([0, 0, 8.11], degrees=True)
+                # meas = fix_rot.apply(meas)
+
                 # 获取结果
                 _pose = results[i].add((meas, meas_cov), s_pose, disp, eval_t=eval_t)
 
