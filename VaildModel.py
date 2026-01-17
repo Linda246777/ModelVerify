@@ -35,6 +35,7 @@ from pathlib import Path
 import base.rerun_ext as bre
 from base.args_parser import DatasetArgsParser
 from base.datatype import DeviceDataset, UnitData
+from base.draw.Bar import BarData
 from base.draw.CDF import plot_one_cdf
 from base.evaluate import Evaluation
 from base.model import DataRunner, InertialNetworkData, ModelLoader, NetworkResult
@@ -72,7 +73,7 @@ def main():
         obj_path = res_dir / "temp" / f"action_{ud.name}.pkl"
         obj_path.parent.mkdir(parents=True, exist_ok=True)
         # 如果已经计算过
-        if obj_path.exists():
+        if obj_path.exists() and not Data.using_rerun:
             print(f"> 已存在结果：{obj_path}")
             with open(obj_path, "rb") as f:
                 nr_list, evaluator = pickle.load(f)
@@ -86,8 +87,10 @@ def main():
                 ud.imu_data.calibrate_with(dap.args.config)
 
             # 可视化
-            bre.RerunView().add_spatial_view().send(ud.name)
-            bre.send_pose_data(ud.gt_data, "Groundtruth", color=[192, 72, 72])
+            if Data.using_rerun:
+                print("> Using rerun")
+                bre.RerunView().add_spatial_view().send(ud.name)
+                bre.send_pose_data(ud.gt_data, "Groundtruth", color=[192, 72, 72])
 
             # 模型推理
             dr = DataRunner(ud, Data, has_init_rerun=True)
@@ -106,6 +109,14 @@ def main():
         model_cdf = Evaluation.get_cdf(nr_list[0].err_list, nets[0].name)
         plot_one_cdf(model_cdf, unit_out_dir / "CDF.png", show=False)
 
+        BarData(
+            x=None,
+            y=nr_list[0].eval_t_list,
+            x_label="Cnt",
+            y_label="Time(s)",
+            title=f"Inference Latency with {nr_list[0].network_device_name}",
+        ).draw(unit_out_dir)
+
         evaluator.save(unit_out_dir / "Eval.json")
         return nr_list, evaluator
 
@@ -122,7 +133,7 @@ def main():
         dataset_path = Path(dap.dataset)
         datas = DeviceDataset(dataset_path)
         # 使用 网络名称 + 设备名称
-        res_dir = EvalDir / f"{nets[0].name}_{datas.device_name}_calib"
+        res_dir = EvalDir / f"{nets[0].name}_{datas.device_name}_rotate"
         res_dir.mkdir(parents=True, exist_ok=True)
         # 存储结果
         netres_list: list[NetworkResult] = []

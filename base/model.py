@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from typing import TypeAlias
 
@@ -25,11 +26,22 @@ class InertialNetwork:
         self.model_path = Path(model_path)
         self.name = self.model_path.name.split(".")[0]
         self.device = device.DefaultDevice
+        self.device_name = str(self.device)
         self.model = torch.jit.load(self.model_path, map_location=self.device)
-        self.input_shape = input_shape
-        self.model.eval()
 
+        if input_shape is not None:
+            self.input_shape = input_shape
+        else:
+            self.input_shape = (1, 6, 200)
+        self.model.eval()
         print(f"Model: {self.model_path.name} load success.")
+
+        self.warmup()
+        print("Warmup complete.")
+
+    def warmup(self):
+        block = torch.randn(self.input_shape, dtype=torch.float32, device=self.device)
+        self.model(block)
 
     def predict(self, block: NDArray) -> NetworkOutput:
         if self.input_shape:
@@ -41,6 +53,19 @@ class InertialNetwork:
         meas: NDArray = output[0].cpu().detach().numpy().flatten()
         meas_cov: NDArray = output[1].cpu().detach().numpy().flatten()
         return meas, meas_cov
+
+    def predict_with_time(self, block: NDArray) -> tuple[NetworkOutput, float]:
+        start_time = time.perf_counter()
+        if self.input_shape:
+            assert block.shape == self.input_shape, (
+                f"Input shape mismatch: {block.shape} != {self.input_shape}"
+            )
+        inputs = torch.as_tensor(block, dtype=torch.float32, device=self.device)
+        output = self.model(inputs)
+        meas: NDArray = output[0].cpu().detach().numpy().flatten()
+        meas_cov: NDArray = output[1].cpu().detach().numpy().flatten()
+        end_time = time.perf_counter()
+        return (meas, meas_cov), end_time - start_time
 
     def reset(self):
         self.model.eval()
@@ -151,6 +176,7 @@ class NetworkResult:
 
     gt_list: list[NDArray]  # 20Hz速度列表 rate / step
     err_list: list  # 误差
+    eval_t_list: list[float]  # 模型推理耗时
 
     pose: Pose
     pose_list: list[Pose]  # 位置结果
@@ -163,6 +189,7 @@ class NetworkResult:
         step: int = 10,
         rate: int = 200,
         using_rerun: bool = True,
+        network_device_name: str = "",
     ):
         self.tag = tag
         self.step = step
@@ -172,6 +199,8 @@ class NetworkResult:
 
         self.gt_list = []
         self.err_list = []
+        self.eval_t_list = []
+        self.network_device_name = network_device_name
 
         self.meas_list = []
         self.meas_cov_list = []
@@ -202,9 +231,11 @@ class NetworkResult:
         output: NetworkOutput,
         ref_pose: Pose = Pose.identity(),
         ref_disp: NDArray | None = None,
+        eval_t: float = 0.0,
     ):
         self.meas_list.append(output[0])
         self.meas_cov_list.append(output[1])
+        self.eval_t_list.append(eval_t)
 
         self.positon += output[0] * self.interval_us / 1e6
         pose = ref_pose.copy()
@@ -252,6 +283,9 @@ class InertialNetworkData:
     _idx_range: slice = slice(None, None, None)
     imu_block: NDArray[np.float32]
 
+    using_rerun: bool = True
+    rotate_heading: bool = False
+
     @classmethod
     def set_step(cls, step: int):
         cls.step = step
@@ -260,6 +294,11 @@ class InertialNetworkData:
     @classmethod
     def set_rate(cls, rate: int):
         cls.rate = rate
+        return cls
+
+    @classmethod
+    def no_rerun(cls):
+        cls.using_rerun = False
         return cls
 
     @classmethod
@@ -274,6 +313,11 @@ class InertialNetworkData:
         end_idx = int(te * cls.rate) if te is not None else None
 
         cls._idx_range = slice(start_idx, end_idx)
+        return cls
+
+    @classmethod
+    def heading(cls, rotate_heading: bool = True):
+        cls.rotate_heading = rotate_heading
         return cls
 
     def __init__(
@@ -335,12 +379,15 @@ class InertialNetworkData:
             for i, deg in enumerate(degrees):
                 # 旋转任意角度
                 yaw_rot = Rotation.from_rotvec([0, 0, deg], degrees=True)
-                block_rot = self.rotate_block(block, yaw_rot)
-                # 获取网络结果
-                net_out = network.predict(block_rot)
+                block = self.rotate_block(block, yaw_rot)
+                # 获取网络结果， 统计耗时
+                (meas, meas_cov), eval_t = network.predict_with_time(block)
+
                 # 反向旋转
-                net_out = yaw_rot.inv().apply(net_out[0]), net_out[1]
-                _pose = results[i].add(net_out, ref_pose)
+                meas = yaw_rot.inv().apply(meas)
+                meas_cov = yaw_rot.inv().apply(meas_cov)
+
+                _pose = results[i].add((meas, meas_cov), ref_pose, eval_t=eval_t)
                 print(f"{network.name}_{deg}-{idx}: {_pose.p}")
         return results
 
@@ -360,7 +407,8 @@ class InertialNetworkData:
                 ref_poses.get_pose(0).p,
                 step=self.step,
                 rate=self.rate,
-                using_rerun=True,
+                using_rerun=self.using_rerun,
+                network_device_name=model.device_name,
             )
             for model in networks
         ]
@@ -369,19 +417,31 @@ class InertialNetworkData:
             s_pose = ref_poses.get_pose(idx)
             e_pose = ref_poses.get_pose(idx + self.rate)
             disp = e_pose.p - s_pose.p
-            yaw_rot = s_pose.get_yaw_pose().rot
+
+            # 对齐行走方向
+            if self.rotate_heading:
+                yaw_rot = s_pose.get_yaw_pose().rot
+                block = self.rotate_block(block, yaw_rot)
+            else:
+                yaw_rot = Rotation.identity()
+
             for i, net in enumerate(networks):
-                block_rot = self.rotate_block(block, yaw_rot)
+                (meas, meas_cov), eval_t = net.predict_with_time(block)
 
-                meas, meas_cov = net.predict(block_rot)
-                meas = yaw_rot.inv().apply(meas)
-                meas_cov = yaw_rot.inv().apply(meas_cov)
+                # 对齐行走方向
+                if self.rotate_heading:
+                    meas = yaw_rot.inv().apply(meas)
+                    meas_cov = yaw_rot.inv().apply(meas_cov)
 
+                # 测试 输出长度的准确性
                 if test_scale:
                     meas = np.linalg.norm(meas) * disp / np.linalg.norm(disp)
+                # 测试 输出角度的准确性
                 if test_heading:
                     meas = np.linalg.norm(disp) * meas / np.linalg.norm(meas)
-                _pose = results[i].add((meas, meas_cov), s_pose, disp)
+
+                # 获取结果
+                _pose = results[i].add((meas, meas_cov), s_pose, disp, eval_t=eval_t)
 
         return results
 
@@ -416,7 +476,7 @@ class DataRunner:
         assert len(self.gt_data) > 0, f"{self.gt_data}"
         self.init_pose = Pose.from_transform(self.gt_data.ps[0])
 
-        if not has_init_rerun:
+        if not has_init_rerun and self.in_data.using_rerun:
             # rre.rerun_init(ud.name, imu_view_tags=["GT", "Raw"])
             rre.RerunView().add_imu_view(
                 tags=["GT", "Raw"],
