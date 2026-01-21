@@ -14,6 +14,7 @@ dependencies = [
     "onnxscript>=0.5.7",
     "opencv-python>=4.11.0.86",
     "pandas>=2.3.3",
+    "psutil>=7.2.1",
     "rerun-sdk>=0.27.2",
     "scipy>=1.16.3",
     "scipy-stubs>=1.16.3.0",
