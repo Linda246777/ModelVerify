@@ -114,14 +114,14 @@ def main():
             model_cdf = get_cdf_from_err(nr.err_list, nets[0].name)
             plot_one_cdf(model_cdf, unit_out_dir / "CDF.png", show=False)
 
-        if "eval_t_list" in nr.__dict__:
-            Bar(
-                x=None,
-                y=nr.eval_t_list,
-                x_label="x",
-                y_label="Time(s)",
-                title=f"Inference Latency with {nr_list[0].network_device_name}",
-            ).save(unit_out_dir)
+            if "eval_t_list" in nr.__dict__:
+                Bar(
+                    x=None,
+                    y=nr.eval_t_list,
+                    x_label="x",
+                    y_label="Time(s)",
+                    title=f"Inference Latency with {nr_list[0].network_device_name}",
+                ).save(unit_out_dir)
 
         return nr_list, evaluator
 
