@@ -142,8 +142,8 @@ class Evaluation:
         ate_errs = self.__get_ATE(eva_poses)
         ape = np.mean(ape_errs)
         ate = np.mean(ate_errs)
-        ape_cdf = get_cdf_from_err(ape_errs)
-        ate_cdf = get_cdf_from_err(ate_errs)
+        ape_cdf = get_cdf_from_err(ape_errs, tag)
+        ate_cdf = get_cdf_from_err(ate_errs, tag)
         # 记录值
         res["APE(_)"] = ape
         res["ATE(m)"] = ate
@@ -156,8 +156,8 @@ class Evaluation:
         if self.time_length > self.rel_duration:
             rpe_errs = self.__get_RPE(eva_poses)
             rte_errs = self.__get_RTE(eva_poses)
-            rpe_cdf = get_cdf_from_err(rpe_errs)
-            rte_cdf = get_cdf_from_err(rte_errs)
+            rpe_cdf = get_cdf_from_err(rpe_errs, tag)
+            rte_cdf = get_cdf_from_err(rte_errs, tag)
             rpe = np.mean(rpe_errs)
             rte = np.mean(rte_errs)
             # 记录值
@@ -172,7 +172,9 @@ class Evaluation:
         return res, self.inner[tag]
 
     def get_cdf(self, tag: str, err_type: Literal["APE", "ATE", "RPE", "RTE"] = "ATE"):
-        return self.inner[tag][f"{err_type}_CDF"]
+        cdf_data = self.inner[tag][f"{err_type}_CDF"]
+        cdf_data["tag"] += f"_{err_type}"
+        return cdf_data
 
 
 def get_cdf_from_err(errors: NDArray | list, tag: str = "") -> dict:

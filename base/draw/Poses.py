@@ -99,6 +99,8 @@ def draw_trajectory_2d(
     # 显示图像
     if show:
         plt.show()
+    else:
+        plt.close()
 
     return ax
 
@@ -211,5 +213,7 @@ def draw_trajectory_2d_compare(
     # 显示图像
     if show:
         plt.show()
+    else:
+        plt.close()
 
     return ax

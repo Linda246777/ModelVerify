@@ -36,6 +36,7 @@ import numpy as np
 from tqdm import tqdm
 
 from base.args_parser import DatasetArgsParser
+from base.calibration import space
 from base.datatype import DeviceDataset, GroundTruthData, UnitData
 from base.draw.CDF import plot_one_cdf
 from base.draw.Poses import draw_trajectory_2d_compare
@@ -56,7 +57,7 @@ def main():
         model_names = ["model_resnet_0111_96"]
 
     # 结果输出路径 - 使用模型名称组合
-    output = Path(dap.output) if dap.output else Path("results")
+    output = Path(dap.output) if dap.output else None
 
     def action(ud: UnitData, res_dir: Path, name: str):
         """对单个数据执行模型推理"""
@@ -65,42 +66,51 @@ def main():
 
         # 读取
         eval_path = ud.base_dir / f"{name}.csv"
-        eval_pose = GroundTruthData.from_csv(eval_path)
+        eval_poses = GroundTruthData.from_csv(eval_path)
 
         ud.load_data()
-        evaluator = Evaluation(ud.gt_data, name=ud.name, rel_duration=1)
-        evaluator.get_eval(eval_pose, name)
+        tf_fg = space.global12(eval_poses, ud.gt_data)
+        ud.gt_data.transform_global(tf_fg)
 
-        cdf_data = evaluator.get_cdf(name, "RTE")
+        evaluator = Evaluation(ud.gt_data, name=ud.name, rel_duration=1)
+        evaluator.get_eval(eval_poses, name)
+
+        cdf_data = evaluator.get_cdf(name, "ATE")
 
         draw_trajectory_2d_compare(
-            [eval_pose, evaluator.ref_poses],
+            [eval_poses, evaluator.ref_poses],
             labels=["Fusion", "GT"],
             save_path=unit_out_dir / "trajectory.png",
             show=False,
         )
         plot_one_cdf(
             cdf_data,
-            unit_out_dir / "PoseCDF.png",
+            unit_out_dir / f"{cdf_data['tag']}.png",
             (0, np.max(cdf_data["errors"])),
             show=False,
         )
 
-    # 输出路径
-    res_dir = output
-    res_dir.mkdir(parents=True, exist_ok=True)
+        last_eval_pose = eval_poses.get_pose(len(eval_poses) - 1)
+        last_gt_pose = ud.gt_data.get_pose(len(ud.gt_data) - 1)
+
+        # 计算重点误差
+        error = np.linalg.norm(last_eval_pose.p - last_gt_pose.p)
+        print(f"Final Error: {error:.4f}m")
 
     if dap.unit:
         unit_path = Path(dap.unit)
+        if output is None:
+            output = unit_path.parent
+
         ud = UnitData(unit_path)
-        action(ud, res_dir, dap.args.name)
+        action(ud, output, dap.args.name)
 
     elif dap.dataset:
         dataset_path = Path(dap.dataset)
         datas = DeviceDataset(dataset_path)
 
         for ud in tqdm(datas, desc="Evaluating"):
-            action(ud, res_dir, dap.args.name)
+            action(ud, dataset_path, dap.args.name)
 
 
 if __name__ == "__main__":
