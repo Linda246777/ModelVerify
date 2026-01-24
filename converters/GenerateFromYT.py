@@ -44,8 +44,10 @@ HDF5 文件包含以下分组：
 
 === 使用示例 ===
     # 转换单个文件
-    loader = H5Loader("/path/to/dataset.h5")
-    loader.convert_all()
+    uv run python converters/GenerateFromYT.py -d /path/to/dataset.h5
+
+    # 不去偏差转换
+    uv run python converters/GenerateFromYT.py -d /path/to/dataset.h5 --no-bias-removal
 
     # 生成的文件结构：
     # /path/to/dataset/
@@ -67,6 +69,7 @@ HDF5 文件包含以下分组：
 4. 生成的目录结构与原始 HDF5 文件的分组结构一致
 """
 
+import argparse
 from pathlib import Path
 
 import h5py
@@ -77,9 +80,6 @@ from scipy.spatial.transform import Rotation
 from base.datatype import GroundTruthData, ImuData
 from base.serialize import TLIOSerializer, UnitSerializer
 
-sample = "/Users/qi/Resources/SimpleDemo.h5"
-main = "/Users/qi/Resources/YT_server_200Hz.h5"
-
 # 文件结构
 # 'para', 'test', 'train', 'valid'
 # "mid360_2025-10-27_221831_00"
@@ -87,16 +87,18 @@ main = "/Users/qi/Resources/YT_server_200Hz.h5"
 
 
 class H5Loader:
-    def __init__(self, filepath: str) -> None:
+    def __init__(self, filepath: str, remove_bias: bool = True) -> None:
         self.filepath = Path(filepath)
         self.h5_data = h5py.File(filepath, "r")
+        self.remove_bias = remove_bias
 
         self.savepath = self.filepath.parent / self.filepath.name.split(".")[0]
 
-    def _parse_unit(self, unit: Group, remove_bias=False):
+    def _parse_unit(self, unit: Group):
         """
         <KeysViewHDF5 ['acc', 'acc_bias', 'gyr', 'gyr_bias', 'mag', 'motion_qua', 'pos', 'qua', 'ts']>
         """
+
         acc = np.array(unit["acc"])
         _acc_bias = np.array(unit["acc_bias"])
         gyr = np.array(unit["gyr"])
@@ -107,7 +109,7 @@ class H5Loader:
         qua = np.array(unit["qua"])
         ts = np.array(unit["ts"])
 
-        if remove_bias:
+        if self.remove_bias:
             acc = acc - _acc_bias
             gyr = gyr - _gyr_bias
 
@@ -126,7 +128,7 @@ class H5Loader:
             unit = group[key]
             assert isinstance(unit, Group)
             # 解析数据
-            data = self._parse_unit(unit, remove_bias=True)
+            data = self._parse_unit(unit)
             # 保存数据
             base_unit_dir = self.base_group_dir / key
             tlio_unit_dir = self.tlio_group_dir / key
@@ -134,10 +136,11 @@ class H5Loader:
             TLIOSerializer(*data).save(tlio_unit_dir)
 
     def convert_all(self):
+        groups = ["train", "test", "valid"]
+
         self.base_dir = self.savepath
         self.tlio_dir = self.savepath.parent / f"TLIO_{self.savepath.name}"
-        keys = ["train", "test", "valid"]
-        for key in keys:
+        for key in groups:
             self.base_group_dir = self.base_dir / key
             self.tlio_group_dir = self.tlio_dir / key
 
@@ -146,7 +149,30 @@ class H5Loader:
             self.convert(group)
 
 
-if __name__ == "__main__":
+def main():
+    parser = argparse.ArgumentParser(description="将 HDF5 数据集转换为项目标准格式")
+    parser.add_argument(
+        "-d",
+        "--dataset",
+        type=str,
+        required=True,
+        help="HDF5 数据集文件路径",
+    )
+    parser.add_argument(
+        "--no-bias-removal",
+        action="store_true",
+        help="不自动去除传感器偏差（默认去偏）",
+    )
+
+    args = parser.parse_args()
+
     # 探索文件结构
-    h5_loader = H5Loader(main)
+    h5_loader = H5Loader(args.dataset, remove_bias=not args.no_bias_removal)
     h5_loader.convert_all()
+    print("转换完成！")
+    print(f"Base 格式输出: {h5_loader.base_dir}")
+    print(f"TLIO 格式输出: {h5_loader.tlio_dir}")
+
+
+if __name__ == "__main__":
+    main()

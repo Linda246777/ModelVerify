@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-不确定性误差分析模块
+不确定性误差分析
 
 分析神经网络预测的协方差（不确定性估计）与实际误差之间的关系。
 
@@ -10,21 +10,12 @@
 3. 可视化展示协方差与误差的散点图及统计信息
 
 使用方法：
-    python UncertaintyOfError.py -m <模型名称> --dataset <数据集路径>
-    python UncertaintyOfError.py -m <模型名称> --unit <单个数据路径>
+    uv run python validators/UncertaintyOfError.py -m <模型名称> --dataset <数据集路径>
+    uv run python validators/UncertaintyOfError.py -m <模型名称> --unit <单个数据路径>
 
 输出：
     - covariance_error_analysis_3axis.png: 3轴协方差-误差分析可视化图
     - 结果保存在 results/<模型名>_<设备名>/ 目录下
-
-类：
-    NetworkResultAnalysis: 分析协方差与误差的关系，生成可视化图表
-
-依赖：
-    - numpy: 数值计算
-    - matplotlib: 绘图
-    - scipy.stats.pearsonr: 相关性分析
-    - tqdm: 进度条
 """
 
 from pathlib import Path

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """
+多模型对比可视化
+
 这是一个用于可视化惯性导航网络模型结果的Python脚本。
 
 主要功能：
@@ -8,17 +10,21 @@
 3. 提供数据可视化功能
 4. 支持多个模型的批量推理
 
-使用说明：
-1. 通过命令行参数指定要使用的模型和模型路径
-2. 可以处理单个单元数据(--unit)或整个数据集(--dataset)
-3. 可视化使用Rerun框架实现
+用法:
+    # 对比单个数据单元上的多个模型
+    uv run python visualizers/DrawCompare.py -u <unit_path> -m model1 model2
 
-作者：qi-xmu
-版本：1.0
+    # 对比整个数据集上的多个模型
+    uv run python visualizers/DrawCompare.py -d <dataset_path> -m model1 model2
 
-示例用法：
-python DrawCompare.py --unit /path/to/data --models model1 model2
-python DrawCompare.py --dataset /path/to/dataset --models_path /custom/models/path
+    # 指定模型文件夹
+    uv run python visualizers/DrawCompare.py -u <unit_path> -m model1 model2 --models_path /path/to/models
+
+参数:
+    -u, --unit: 指定单个数据单元路径
+    -d, --dataset: 指定数据集路径
+    -m, --models: 指定模型文件名（支持多个）
+    --models_path: 指定模型文件夹路径（默认为"models"）
 """
 
 import numpy as np

@@ -27,7 +27,11 @@ TLIO golden数据集结构:
     - aligned: 使用npy的global frame数据 (200Hz，已对齐)
 
 用法:
-    python TLIO2H5.py -i /path/to/tlio_golden -o output.h5
+    uv run python converters/TLIO2H5Dataset.py -i /path/to/tlio_golden -o output.h5
+
+参数:
+    -i, --input: 输入TLIO golden数据集目录
+    -o, --output: 输出H5文件路径
 """
 
 import argparse

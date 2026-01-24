@@ -1,6 +1,24 @@
 #!/usr/bin/env python3
 """
-只有真值和IMU数据时，使用此脚本进行验证。
+模型轨迹绘制
+
+只有真值和IMU数据时，使用此脚本进行验证和可视化。
+
+用法:
+    # 验证单个数据单元
+    uv run python visualizers/DrawModel.py -u <unit_path> -m model_name
+
+    # 验证整个数据集
+    uv run python visualizers/DrawModel.py -d <dataset_path> -m model_name
+
+    # 指定模型文件夹
+    uv run python visualizers/DrawModel.py -u <unit_path> -m model_name --models_path /path/to/models
+
+参数:
+    -u, --unit: 指定单个数据单元路径
+    -d, --dataset: 指定数据集路径
+    -m, --models: 指定模型文件名（支持多个）
+    --models_path: 指定模型文件夹路径（默认为"models"）
 """
 
 import base.rerun_ext as bre

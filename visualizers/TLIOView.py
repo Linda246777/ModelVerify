@@ -1,4 +1,21 @@
 #!/usr/bin/env python3
+"""
+TLIO数据可视化
+
+用于可视化TLIO（Tracker Lite Inertial Odometry）数据。
+
+用法:
+    # 可视化单个数据单元
+    uv run python visualizers/TLIOView.py -u <unit_path> -m model_name
+
+    # 指定模型文件夹
+    uv run python visualizers/TLIOView.py -u <unit_path> -m model_name --models_path /path/to/models
+
+参数:
+    -u, --unit: 指定单个数据单元路径
+    -m, --models: 指定模型文件名（支持多个）
+    --models_path: 指定模型文件夹路径（默认为"models"）
+"""
 from pathlib import Path
 
 import numpy as np

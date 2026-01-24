@@ -1,6 +1,6 @@
 # ModelVerify
 
-> **文档更新日期：2026-01-14**
+> **文档更新日期：2026-01-24**
 
 一个用于验证和测试惯性导航模型的Python工具包。
 
@@ -45,16 +45,16 @@
 ### 环境要求
 
 - Python >= 3.11
-- 推荐使用 `uv` 作为包管理器
+- 使用 `uv` 作为包管理器
 
 ### 安装依赖
 
 ```bash
-# 使用uv安装依赖
+# 同步依赖并安装项目
 uv sync
 
-# 或使用pip安装
-pip install -e .
+# 或者只安装项目依赖（开发模式）
+uv pip install -e .
 ```
 
 ## 快速开始
@@ -63,40 +63,56 @@ pip install -e .
 
 ```bash
 # 验证单个数据单元
-python main.py -u <unit_path> -m model1.pt model2.pt
+uv run python main.py -u <unit_path> -m model1.pt model2.pt
 
 # 验证整个数据集
-python main.py -d <dataset_path> -m model1.pt model2.pt
+uv run python main.py -d <dataset_path> -m model1.pt model2.pt
 
 # 使用AHRS数据
-python main.py -u <unit_path> -m model1.pt --using_ahrs
+uv run python main.py -u <unit_path> -m model1.pt --using_ahrs
 ```
 
 ### 模型验证
 
 ```bash
 # 批量验证模型并生成CDF图
-python VaildModel.py -d <dataset_path> -m model1.pt
+uv run python validators/VaildModel.py -d <dataset_path> -m model1.pt
 
-# 模型分析
-python ModelAnalysis.py -u <unit_path> -m model1.pt
+# 从H5文件验证模型
+uv run python validators/VaildModelFromH5.py -d <h5_file_path> -m model1.pt
+
+# 数据集分析
+uv run python validators/DatasetAnalysis.py -d <dataset_path>
 ```
 
 ### 数据集生成
 
 ```bash
-# 从H5文件生成验证数据集
-python GenerateFromH5.py -h <h5_file_path>
+# 从YT数据生成数据集
+uv run python converters/GenerateFromYT.py -d <input_path> -o <output_path>
+
+# 从H5文件生成数据集
+uv run python converters/GenerateH5Dataset.py -d <h5_file_path>
 ```
 
 ### 可视化
 
 ```bash
 # 绘制模型轨迹
-python DrawModel.py -u <unit_path> -m model1.pt
+uv run python visualizers/DrawModel.py -u <unit_path> -m model1.pt
 
 # 对比多个模型
-python DrawCompare.py -u <unit_path> -m model1.pt model2.pt
+uv run python visualizers/DrawCompare.py -u <unit_path> -m model1.pt model2.pt
+
+# TLIO数据可视化
+uv run python visualizers/TLIOView.py -u <unit_path>
+```
+
+### 模型转换
+
+```bash
+# TorchScript模型转Android
+uv run python converters/TorchScript2Android.py -i input_model.pt -o output_model.pt
 ```
 
 ### 📚 更多文档
@@ -124,37 +140,59 @@ python DrawCompare.py -u <unit_path> -m model1.pt model2.pt
 ```
 ModelVerify/
 ├── main.py                 # 主程序入口
-├── TLIOView.py             # TLIO数据可视化
-├── VaildModel.py           # 模型验证工具
-├── ModelAnalysis.py        # 模型分析工具
-├── GenerateFromH5.py       # 从H5文件生成验证数据集
-├── TorchScript.py          # TorchScript转换示例
-├── TorchScript2Android.py  # TorchScript转换为Android
-├── DrawModel.py            # 模型绘制工具
-├── DrawCompare.py          # 模型对比可视化
-├── DrawCompareOnly.py      # 仅对比可视化
-├── SpinCompare.py          # 旋转对比分析
-├── base/                   # 核心模块
-│   ├── args_parser.py      # 命令行参数解析
-│   ├── datatype.py         # 数据类型定义
-│   ├── device.py           # 设备配置
-│   ├── interpolate.py      # 数据插值
-│   ├── model.py            # 模型加载与预测
-│   ├── evaluate.py         # 性能评估
-│   ├── rerun_ext.py        # Rerun扩展
-│   ├── serialize.py        # 数据序列化
-│   ├── rtab.py             # RTAB相关功能
-│   ├── binary.py           # 二进制数据处理
-│   ├── calibration/        # 标定模块
-│   └── draw/               # 可视化模块
-│       ├── CDF.py          # 累积分布函数绘制
-│       ├── Uncertainty.py  # 不确定性可视化
-│       └── Poses.py        # 位姿可视化
+├── src/                    # 核心模块源码
+│   └── base/               # 基础模块
+│       ├── args_parser.py      # 命令行参数解析
+│       ├── datatype.py         # 数据类型定义
+│       ├── device.py           # 设备配置
+│       ├── interpolate.py      # 数据插值
+│       ├── model.py            # 模型加载与预测
+│       ├── evaluate.py         # 性能评估
+│       ├── rerun_ext.py        # Rerun扩展
+│       ├── serialize.py        # 数据序列化
+│       ├── rtab.py             # RTAB相关功能
+│       ├── binary.py           # 二进制数据处理
+│       ├── obj.py              # 对象定义
+│       ├── utils.py            # 工具函数
+│       ├── calibration/        # 标定模块
+│       │   ├── space.py        # 空间标定
+│       │   └── time.py         # 时间标定
+│       ├── dataset/            # 数据集模块
+│       │   ├── dataset.py      # 数据集基类
+│       │   └── H5Type.py       # H5数据类型
+│       ├── analysis/           # 分析模块
+│       │   └── dataset_analysis.py
+│       └── draw/               # 可视化模块
+│           ├── CDF.py          # 累积分布函数绘制
+│           ├── Poses.py        # 位姿可视化
+│           ├── Scatter.py      # 散点图
+│           └── Bar.py          # 柱状图
+├── validators/             # 模型验证脚本
+│   ├── VaildModel.py           # 模型验证工具
+│   ├── VaildModelFromH5.py     # 从H5验证模型
+│   ├── DatasetAnalysis.py      # 数据集分析
+│   ├── ValidTrack.py           # 轨迹验证
+│   └── UncertaintyOfError.py   # 误差不确定性分析
+├── visualizers/            # 可视化脚本
+│   ├── DrawModel.py            # 模型轨迹绘制
+│   ├── DrawCompare.py          # 多模型对比
+│   ├── DrawCompareOnly.py      # 仅对比可视化
+│   └── TLIOView.py             # TLIO数据可视化
+├── converters/             # 数据转换脚本
+│   ├── GenerateFromYT.py       # 从YT数据转换
+│   ├── GenerateH5Dataset.py    # 生成H5数据集
+│   ├── GenerateValid.py        # 生成验证数据
+│   ├── TLIO2H5Dataset.py       # TLIO转H5
+│   └── TorchScript2Android.py  # TorchScript转Android
+├── scripts/                # 批处理脚本
+│   ├── batch_validate.py       # 批量验证
+│   └── batch_generate_h5.sh    # 批量生成H5
+├── configs/                # 配置文件
 ├── docs/                   # 详细文档
-│   └── USAGE.md            # 使用指南
 ├── tests/                  # 测试用例
 ├── datasets/               # 数据集目录
-└── results/                # 结果输出目录
+├── results/                # 结果输出目录
+└── models/                 # 模型文件目录
 ```
 
 ## 核心组件

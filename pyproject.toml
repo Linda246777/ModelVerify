@@ -22,7 +22,6 @@ dependencies = [
     "torch>=2.9.1",
 ]
 
-[tool.uv.workspace]
-members = [
-    "dist",
-]
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"

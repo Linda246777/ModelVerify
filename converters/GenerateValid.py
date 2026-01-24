@@ -28,13 +28,20 @@
 
 使用示例:
     # 处理单个单元
-    python GenerateValid.py --unit <unit_path> --output <output_dir>
+    uv run python converters/GenerateValid.py -u <unit_path> -o <output_dir>
 
     # 批量处理数据集
-    python GenerateValid.py --dataset <dataset_path> --output <output_dir>
+    uv run python converters/GenerateValid.py -d <dataset_path> -o <output_dir>
 
-    # 指定模型 (参数已定义但当前未使用)
-    python GenerateValid.py --models model1 model2 --models_path <models_dir>
+    # 指定模型
+    uv run python converters/GenerateValid.py -m model1 model2 --models_path <models_dir>
+
+参数:
+    -u, --unit: 指定单个数据单元路径
+    -d, --dataset: 指定数据集路径
+    -o, --output: 输出目录路径（必需）
+    -m, --models: 指定模型文件名（支持多个）
+    --models_path: 指定模型文件夹路径（默认为"models"）
 
 输入数据格式:
     - 需要包含以下CSV文件: imu.csv, cam.csv, gt.csv, opt.csv

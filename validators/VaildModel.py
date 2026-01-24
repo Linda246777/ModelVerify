@@ -6,13 +6,13 @@
 
 用法:
     # 验证单个数据单元
-    python VaildModel.py -u <unit_path> -m model_name
+    uv run python validators/VaildModel.py -u <unit_path> -m model_name
 
     # 验证整个数据集
-    python VaildModel.py -d <dataset_path> -m model_name
+    uv run python validators/VaildModel.py -d <dataset_path> -m model_name
 
     # 指定模型文件夹
-    python VaildModel.py -u <unit_path> -m model_name --models_path /path/to/models
+    uv run python validators/VaildModel.py -u <unit_path> -m model_name --models_path /path/to/models
 
 参数:
     -u, --unit: 指定单个数据单元路径

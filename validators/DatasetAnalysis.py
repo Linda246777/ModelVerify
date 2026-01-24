@@ -1,8 +1,31 @@
 #!/usr/bin/env python3
 """
-分析数据集成分
+数据集成分分析
 
+分析数据集的组成成分，评估模型在数据集上的表现。
 
+用法:
+    # 分析单个数据单元
+    uv run python validators/DatasetAnalysis.py -u <unit_path> -m model_name
+
+    # 分析整个数据集
+    uv run python validators/DatasetAnalysis.py -d <dataset_path> -m model_name
+
+    # 指定模型文件夹
+    uv run python validators/DatasetAnalysis.py -d <dataset_path> -m model_name --models_path /path/to/models
+
+参数:
+    -u, --unit: 指定单个数据单元路径
+    -d, --dataset: 指定数据集路径
+    -m, --models: 指定模型文件名（支持多个）
+    --models_path: 指定模型文件夹路径（默认为"models"）
+
+输出:
+    - results/<model_name>/<unit_name>/: 单个单元的结果目录
+      - CDF.png: 误差累积分布函数图
+      - Eval.json: 评估指标
+    - results/<model_name>_<device_name>/: 数据集结果目录
+      - 综合分析结果
 """
 
 from pathlib import Path
@@ -12,7 +35,7 @@ from base.analysis import DatasetAnalysis, UnitAnalysis
 from base.args_parser import DatasetArgsParser
 from base.datatype import DeviceDataset, UnitData
 from base.draw.CDF import plot_one_cdf
-from base.evaluate import Evaluation
+from base.evaluate import Evaluation, get_cdf_from_err
 from base.model import DataRunner, InertialNetworkData, ModelLoader
 from base.obj import Obj
 
@@ -73,7 +96,7 @@ def main():
             Obj.save((netres, evaluator), obj_path)
 
         # 绘制 CDF
-        model_cdf = Evaluation.get_cdf(netres[0].err_list, nets[0].name)
+        model_cdf = get_cdf_from_err(netres[0].err_list, nets[0].name)
         plot_one_cdf(model_cdf, unit_out_dir / "CDF.png", show=False)
 
         evaluator.save(unit_out_dir / "Eval.json")

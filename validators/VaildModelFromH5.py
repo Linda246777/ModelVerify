@@ -1,31 +1,25 @@
 #!/usr/bin/env python3
 """
-验证模型效果
+验证模型效果（从H5数据集）
 
-验证单个模型在数据集上的效果，生成CDF图和ATE/APE/RPE等评估指标。
+验证单个模型在H5数据集上的效果，生成CDF图和ATE/APE/RPE等评估指标。
 
 用法:
-    # 验证单个数据单元
-    python VaildModel.py -u <unit_path> -m model_name
-
-    # 验证整个数据集
-    python VaildModel.py -d <dataset_path> -m model_name
+    # 验证H5数据集
+    uv run python validators/VaildModelFromH5.py -d <h5_dataset_path> -m model_name
 
     # 指定模型文件夹
-    python VaildModel.py -u <unit_path> -m model_name --models_path /path/to/models
+    uv run python validators/VaildModelFromH5.py -d <h5_dataset_path> -m model_name --models_path /path/to/models
 
 参数:
-    -u, --unit: 指定单个数据单元路径
-    -d, --dataset: 指定数据集路径
+    -d, --dataset: 指定H5数据集路径
     -m, --models: 指定模型文件名（支持多个）
     --models_path: 指定模型文件夹路径（默认为"models"）
 
 输出:
-    - results/<model_name>/<unit_name>/: 单个单元的结果目录
+    - results/<model_name>/<dataset_name>/: 数据集结果目录
       - CDF.png: 误差累积分布函数图
       - Eval.json: 评估指标（ATE/APE/RPE）
-    - results/<model_name>_<device_name>/: 数据集结果目录
-      - CDF.png: 整体误差CDF图
     - results/<model_name>/temp/: 临时结果缓存
 """
 

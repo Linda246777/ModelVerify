@@ -6,13 +6,13 @@
 
 用法:
     # 处理单个数据单元
-    python GenerateH5.py -u <unit_path> -o <output_path>
+    uv run python converters/GenerateH5Dataset.py -u <unit_path> -o <output_path>
 
     # 处理整个数据集
-    python GenerateH5.py -d <dataset_path> -o <output_path>
+    uv run python converters/GenerateH5Dataset.py -d <dataset_path> -o <output_path>
 
     # 指定训练集划分比例
-    python GenerateH5.py -d <dataset_path> -o <output_path> --train_ratio 0.7 --val_ratio 0.2 --test_ratio 0.1
+    uv run python converters/GenerateH5Dataset.py -d <dataset_path> -o <output_path> --train_ratio 0.7 --val_ratio 0.2 --test_ratio 0.1
 
 参数:
     -u, --unit: 指定单个数据单元路径

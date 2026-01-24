@@ -6,19 +6,20 @@
 
 用法:
     # 比较单个数据单元上的多个模型
-    python ValidTrack.py -u <unit_path> -m model1 model2
+    uv run python validators/ValidTrack.py -u <unit_path> -m model1 model2
 
     # 比较整个数据集上的多个模型
-    python ValidTrack.py -d <dataset_path> -m model1 model2
+    uv run python validators/ValidTrack.py -d <dataset_path> -m model1 model2
 
     # 指定模型文件夹
-    python ValidTrack.py -u <unit_path> -m model1 model2 --models_path /path/to/models
+    uv run python validators/ValidTrack.py -u <unit_path> -m model1 model2 --models_path /path/to/models
 
 参数:
     -u, --unit: 指定单个数据单元路径
     -d, --dataset: 指定数据集路径
     -m, --models: 指定模型文件名（支持多个）
     --models_path: 指定模型文件夹路径（默认为"models"）
+    -n, --name: 指定轨迹名称（默认为 cam.csv 或 fusion_desktop.csv）
 
 输出:
     - results/<model1>_<model2>_.../ CDF对比图
