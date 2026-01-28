@@ -22,6 +22,7 @@
 from base.args_parser import DatasetArgsParser
 from base.datatype import DeviceDataset, ImuData, UnitData
 from base.model import DataRunner, InertialNetworkData, ModelLoader
+from base.rerun_ext import RerunView, send_imu_data
 
 
 def main():
@@ -31,36 +32,18 @@ def main():
     dap.parser.add_argument("--using_ahrs", action="store_true", default=False)
     dap.parse()
 
-    using_gt = not dap.args.using_ahrs
-    time_range = dap.args.time_range
-    models = dap.args.models
-    if models is None or len(models) == 0:
-        models = ["model_tlio_mi_hw_1216"]
-
-    models_path = "models"
-    if dap.args.models_path is not None:
-        models_path = dap.args.models_path
-    loader = ModelLoader(models_path)
-
-    Data = InertialNetworkData.set_step(20)
     if dap.unit:
         # 数据
         ud = UnitData(dap.unit)
-        ud.imu_data = ImuData.from_csv(ud._imu_path)
-        ud.gt_data = ud.imu_data.to_poses()
-        # ud.gt_data = GroundTruthData.from_csv(ud._gt_path)
+        ud.load_data()
 
-        runner = DataRunner(ud, Data, time_range=time_range, using_gt=using_gt)
-        runner.predict_batch(loader.get_by_names(models))
+        RerunView().add_imu_view(visible=True, tags=["body", "global"]).send(ud.name)
 
-    elif dap.dataset:
-        dataset_path = dap.dataset
-        datas = DeviceDataset(dataset_path)
-        for data in datas:
-            runner = DataRunner(data, Data, time_range=time_range)
-            runner.predict_batch(loader.get_by_names(models))
-    else:
-        dap.parser.print_help()
+        raw_imu_data = ud.imu_data
+
+        global_imu_data = raw_imu_data.transform(ud.gt_data.rots)
+        send_imu_data(raw_imu_data, "body")
+        send_imu_data(global_imu_data, "global")
 
 
 if __name__ == "__main__":
