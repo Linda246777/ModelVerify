@@ -15,13 +15,14 @@ import re
 import shutil
 from pathlib import Path
 
-TARGET_FILES = ("imu-c.csv", "gt.csv", "cam.csv", "gt.png")
+TARGET_FILES = ("imu-c.csv", "gt.csv", "cam.csv", "gt.png", "opt.csv")
 # Map source filenames to target filenames
 FILE_MAPPING = {
     "imu-c.csv": "imu.csv",  # Rename imu-c.csv to imu.csv
     "gt.csv": "gt.csv",
     "cam.csv": "cam.csv",
     "gt.png": "gt.png",
+    "opt.csv": "opt.csv",
 }
 
 
@@ -126,7 +127,7 @@ def organize(input_dir: Path, output_dir: Path, dry_run: bool, force_overwrite: 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="整理 dataset002 并提取 imu-c.csv、gt.csv、cam.csv、gt.png。"
+        description="整理 dataset002 并提取 imu-c.csv、gt.csv、cam.csv、gt.png、opt.csv。"
     )
     parser.add_argument(
         "-i",

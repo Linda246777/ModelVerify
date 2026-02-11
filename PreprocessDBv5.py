@@ -517,6 +517,7 @@ def save_results(
     ts_us = [imu_data.t_us, raw_gt.t_us]
     if opt_data is not None:
         opt_data.t_us = opt_data.t_us + t_offset_us
+        opt_data.reset_start()
         ts_us.append(opt_data.t_us)
 
     t_new_us = get_time_series(ts_us)
