@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-PreprocessDB - RTAB-Map 数据预处理脚本
-插值前时间对齐
-
+PreprocessDB - RTAB-Map 数据预处理脚本（想要把二次时间对齐-插值后有时间对齐集成，没成功）
+暂时先放弃这个版本，保留 PreprocessDBv5.py 作为最终版本
 功能说明：
     1. 从 RTAB-Map 数据库/CSV 加载轨迹数据（.db/.csv）
     2. 从 CSV 文件加载 IMU 数据（imu.csv）
@@ -25,6 +24,7 @@ from pathlib import Path
 import json
 import numpy as np
 from scipy.spatial.transform import Rotation
+import matplotlib.pyplot as plt
 
 import rerun as rr
 
@@ -69,6 +69,95 @@ def find_unit_directories(base_dir: Path, depth: int) -> list[Path]:
     
     _find_dirs(base_dir, depth)
     return unit_dirs
+
+def _get_angvels_local(t_us: np.ndarray, rots: Rotation, step: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    """获取角速度列表（与 time_sync 内逻辑一致）"""
+    n = len(rots)
+    step = max(int(step), 1)
+    assert n >= 2, "At least two rotations are required"
+
+    ang_vels: list[float] = []
+    ts: list[int] = []
+    for i in range(0, n - step, step):
+        drot = rots[i].inv() * rots[i + step]
+        angle = float(np.linalg.norm(drot.as_rotvec()))
+        dt_s = (t_us[i + step] - t_us[i]) * 1e-6
+        if dt_s <= 0:
+            continue
+        ang_vel = angle / dt_s
+        ang_vels.append(ang_vel)
+        ts.append(int(t_us[i]))
+    return np.array(ang_vels, dtype=float), np.array(ts, dtype=np.int64)
+
+def _post_align_by_angvel(
+    imu_poses: PosesData,
+    gt_poses: PosesData,
+    output_dir: Path | None,
+    resolution: int = 200,
+    max_lag_s: float = 0.5,
+    time_range: tuple[float, float] | None = None,
+) -> int:
+    """插值后再对齐角速度，返回额外偏移（微秒）。"""
+    rate = min(imu_poses.rate, gt_poses.rate)
+    resolution = min(resolution, rate)
+    step = max(int(rate / resolution), 1)
+
+    if time_range is not None:
+        t_new_us = get_time_series(
+            [imu_poses.t_us, gt_poses.t_us],
+            float(time_range[0]),
+            float(time_range[1]),
+            rate=rate,
+        )
+        imu_poses = imu_poses.interpolate(t_new_us)
+        gt_poses = gt_poses.interpolate(t_new_us)
+
+    seq_imu, ts_imu = _get_angvels_local(imu_poses.t_us, imu_poses.rots, step=step)
+    seq_gt, ts_gt = _get_angvels_local(gt_poses.t_us, gt_poses.rots, step=step)
+
+    if len(seq_imu) < 2 or len(seq_gt) < 2:
+        return 0
+
+    min_len = min(len(seq_imu), len(seq_gt))
+    seq_imu = seq_imu[:min_len]
+    seq_gt = seq_gt[:min_len]
+    ts = ts_imu[:min_len]
+
+    dt_us = int(ts[1] - ts[0]) if len(ts) > 1 else 0
+    if dt_us <= 0:
+        return 0
+
+    # 去均值，减少偏置影响
+    seq_imu = seq_imu - float(np.mean(seq_imu))
+    seq_gt = seq_gt - float(np.mean(seq_gt))
+
+    corr = np.correlate(seq_imu, seq_gt, mode="full")
+    lag_arr = np.arange(-len(seq_gt) + 1, len(seq_imu))
+
+    max_lag = int(max_lag_s * 1e6 / dt_us)
+    if max_lag > 0:
+        mask = (lag_arr >= -max_lag) & (lag_arr <= max_lag)
+        corr = corr[mask]
+        lag_arr = lag_arr[mask]
+
+    lag = int(lag_arr[int(np.argmax(corr))])
+    extra_offset_us = int(lag * dt_us)
+
+    if output_dir is not None:
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        t_plot = (ts - ts[0]) * 1e-6
+        ax.set_title("Post-Interp Time Offset: {:.3f}s".format(extra_offset_us * 1e-6))
+        ax.plot(t_plot, seq_imu, label="IMU", alpha=0.5)
+        ax.plot(t_plot + extra_offset_us * 1e-6, seq_gt, label="GT", alpha=0.5)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Angular Velocity (rad/s)")
+        ax.legend()
+        ax.grid()
+        fig.savefig(output_dir / "TimeDiff3.png")
+        plt.close(fig)
+
+    return extra_offset_us
 
 def draw_trajectory(raw_gt: GroundTruthData, output_path: Path, opt_gt: PosesData = None):
     """
@@ -173,25 +262,6 @@ def time_sync(
     print(f"=== 时间同步检查（两步法）===")
 
     coarse_range = coarse_range or (0.0, 50.0)
-
-    def _get_angvels_local(t_us: np.ndarray, rots: Rotation, step: int = 1):
-        """获取角速度列表（本地实现，避免改动 time.py）"""
-        n = len(rots)
-        step = max(int(step), 1)
-        assert n >= 2, "At least two rotations are required"
-
-        As: list[float] = []
-        Ts: list[int] = []
-        for i in range(0, n - step, step):
-            drot = rots[i].inv() * rots[i + step]
-            angle = float(np.linalg.norm(drot.as_rotvec()))
-            dt_s = (t_us[i + step] - t_us[i]) * 1e-6
-            if dt_s <= 0:
-                continue
-            ang_vel = angle / dt_s
-            As.append(ang_vel)
-            Ts.append(int(t_us[i]))
-        return np.array(As, dtype=float), np.array(Ts, dtype=np.int64)
 
     def _auto_find_fine_range(
         imu_poses: PosesData,
@@ -512,6 +582,7 @@ def save_results(
     print(f"时间对齐图已由 match21 生成（两步法）：")
     print(f"  - 粗对齐图：{output_dir / 'TimeDiff1.png'}")
     print(f"  - 精对齐图：{output_dir / 'TimeDiff2.png'}")
+    print(f"  - 插值后细对齐图：{output_dir / 'TimeDiff3.png'}")
     
     # 时间同步插值
     print("\n=== 时间同步插值 ===")
@@ -530,6 +601,31 @@ def save_results(
     if opt_data is not None:
         opt_data = opt_data.interpolate(t_new_us)
     print(f"插值完成：GT 和 IMU 都有 {len(raw_gt)} 个点")
+
+    # 插值后再做一次细对齐
+    extra_offset_us = _post_align_by_angvel(
+        imu_data.to_poses(),
+        raw_gt,
+        output_dir,
+        resolution=200,
+        max_lag_s=0.5,
+        time_range=tuple(args.time_range_post) if args.time_range_post else None,
+    )
+    if extra_offset_us != 0:
+        print(f"插值后细对齐偏移: {extra_offset_us} μs")
+        raw_gt.t_us = raw_gt.t_us + extra_offset_us
+        if opt_data is not None:
+            opt_data.t_us = opt_data.t_us + extra_offset_us
+
+        ts_us = [imu_data.t_us, raw_gt.t_us]
+        if opt_data is not None:
+            ts_us.append(opt_data.t_us)
+        t_new_us = get_time_series(ts_us)
+        raw_gt = raw_gt.interpolate(t_new_us)
+        imu_data = imu_data.interpolate(t_new_us)
+        if opt_data is not None:
+            opt_data = opt_data.interpolate(t_new_us)
+        print(f"细对齐后重新插值：GT 和 IMU 都有 {len(raw_gt)} 个点")
 
     # 重置时间起点，使 t=0 对齐
     t_start_us = int(t_new_us[0])
@@ -635,6 +731,14 @@ def main():
         nargs=2,
         default=None,
         help="精对齐时间范围（秒），如: -t2 0 10；不指定则自动选择尖峰最多的约10s窗口",
+    )
+    parser.add_argument(
+        "-t3",
+        "--time-range-post",
+        type=float,
+        nargs=2,
+        default=[0, 50],
+        help="插值后细对齐时间范围（秒），如: -t3 0 50",
     )
     parser.add_argument("-rv", "--rerun-verify", action="store_true", 
                        help="使用 Rerun 验证坐标系转换是否正确")

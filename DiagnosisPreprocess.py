@@ -168,44 +168,91 @@ class TimeSyncDiagnosis:
         results["gt_time_anomalies"] = len(gt_anomalies)
         results["imu_time_anomalies"] = len(imu_anomalies)
         
-        # 4. Key: Check motion correspondence between IMU and GT
-        # Principle: If time sync is correct, IMU angular velocity should correspond to GT rotation changes
-        print("    > Computing motion correlation between IMU and GT...")
+        # 4. 以尖峰匹配为主的时间同步质量评估
+        # 原理：剧烈运动尖峰对齐到位，就说明时间同步正确
+        print("    > 计算尖峰对齐率与尖峰相关性...")
         
-        # 计算 GT 的角速度（从旋转矩阵的变化率）
-        gt_angvel = TimeSyncDiagnosis._compute_angular_velocity(
+        # 计算 GT 与 IMU 的角速度
+        gt_angvel_raw = TimeSyncDiagnosis._compute_angular_velocity(
             gt_poses.rots, gt_poses.t_us
         )
+        imu_angvel_raw = np.linalg.norm(imu_data.gyro, axis=1)
+
+        # 仅用于判定高运动段（用平滑序列减少噪声）
+        gt_angvel_smooth = TimeSyncDiagnosis._smooth_series(gt_angvel_raw)
+        imu_angvel_smooth = TimeSyncDiagnosis._smooth_series(imu_angvel_raw)
         
-        # 计算 IMU 的角速度（陀螺仪数据，需要积分验证）
-        imu_angvel = np.linalg.norm(imu_data.gyro, axis=1)
+        # 尖峰参数（高运动段 + 局部 top 5% + ±100ms 窗口）
+        top_percent = 5.0
+        match_window_ms = 100.0
+        min_separation_ms = 20.0
+        window_sec = 1.0
+        high_motion_percentile = 70.0
         
-        # 对齐时间戳，计算相关性
-        # 重采样到相同的时间轴
-        common_t_start = max(gt_poses.t_us[0], imu_data.t_us[0])
-        common_t_end = min(gt_poses.t_us[-1], imu_data.t_us[-1])
+        gt_motion_windows = TimeSyncDiagnosis._high_motion_windows(
+            gt_angvel_smooth,
+            gt_poses.t_us,
+            window_sec=window_sec,
+            high_motion_percentile=high_motion_percentile,
+        )
+        imu_motion_windows = TimeSyncDiagnosis._high_motion_windows(
+            imu_angvel_smooth,
+            imu_data.t_us,
+            window_sec=window_sec,
+            high_motion_percentile=high_motion_percentile,
+        )
+
+        gt_peak_t_us, _ = TimeSyncDiagnosis._detect_peaks_local(
+            gt_angvel_raw,
+            gt_poses.t_us,
+            motion_windows=gt_motion_windows,
+            top_percent=top_percent,
+            min_separation_ms=min_separation_ms,
+        )
+        imu_peak_t_us, _ = TimeSyncDiagnosis._detect_peaks_local(
+            imu_angvel_raw,
+            imu_data.t_us,
+            motion_windows=imu_motion_windows,
+            top_percent=top_percent,
+            min_separation_ms=min_separation_ms,
+        )
         
-        # 创建公共时间轴（使用较低的采样率以避免噪声）
-        n_samples = min(len(gt_poses), len(imu_data)) // 2
-        common_times = np.linspace(common_t_start, common_t_end, n_samples)
+        peak_match_rate_imu, peak_match_rate_gt = TimeSyncDiagnosis._match_peak_times(
+            imu_peak_t_us, gt_peak_t_us, match_window_ms=match_window_ms
+        )
         
-        # 在公共时间轴上重采样
-        gt_angvel_resampled = np.interp(common_times, gt_poses.t_us, gt_angvel)
-        imu_angvel_resampled = np.interp(common_times, imu_data.t_us, imu_angvel)
+        corr_windows = TimeSyncDiagnosis._intersect_windows(
+            imu_motion_windows,
+            gt_motion_windows,
+        )
+        peak_corr, peak_corr_lag_ms = TimeSyncDiagnosis._peak_cross_correlation(
+            imu_peak_t_us,
+            gt_peak_t_us,
+            overlap_start,
+            overlap_end,
+            target_rate_hz=imu_rate,
+            motion_windows=corr_windows,
+        )
         
-        # 标准化（使相关性计算不受幅度影响）
-        gt_angvel_norm = (gt_angvel_resampled - np.mean(gt_angvel_resampled)) / (np.std(gt_angvel_resampled) + 1e-6)
-        imu_angvel_norm = (imu_angvel_resampled - np.mean(imu_angvel_resampled)) / (np.std(imu_angvel_resampled) + 1e-6)
+        results["peak_top_percent"] = top_percent
+        results["peak_match_window_ms"] = match_window_ms
+        results["peak_min_separation_ms"] = min_separation_ms
+        results["peak_window_sec"] = window_sec
+        results["high_motion_percentile"] = high_motion_percentile
+        results["peak_match_rate_imu"] = float(peak_match_rate_imu)
+        results["peak_match_rate_gt"] = float(peak_match_rate_gt)
+        results["peak_correlation"] = float(peak_corr)
+        results["peak_corr_lag_ms"] = float(peak_corr_lag_ms)
+        results["gt_peak_count"] = int(len(gt_peak_t_us))
+        results["imu_peak_count"] = int(len(imu_peak_t_us))
         
-        # 计算相关系数
-        correlation = float(np.corrcoef(gt_angvel_norm, imu_angvel_norm)[0, 1])
-        results["motion_correlation"] = correlation
-        
-        # 如果相关性很低，说明时间同步可能有问题
-        if not np.isnan(correlation):
-            results["sync_quality"] = "Good" if correlation > 0.7 else ("Fair" if correlation > 0.5 else "Poor")
+        # 尖峰对齐质量判断（调整阈值：0.6->良好，0.4->一般）
+        if peak_match_rate_imu >= 0.6 and abs(peak_corr_lag_ms) <= match_window_ms:
+            results["sync_quality"] = "良好"
+        elif peak_match_rate_imu >= 0.4:
+            results["sync_quality"] = "一般"
         else:
-            results["sync_quality"] = "Unknown"
+            results["sync_quality"] = "较差"
         
         return results
     
@@ -226,19 +273,194 @@ class TimeSyncDiagnosis:
         step = max(int(step), 1)
         
         angvels = []
-        for i in range(n - step):
+        for i in range(0, n - step, step):
             drot = rots[i].inv() * rots[i + step]
             angle = float(np.linalg.norm(drot.as_rotvec()))
             dt_s = (t_us[i + step] - t_us[i]) * 1e-6
-            if dt_s > 0:
-                angvel = angle / dt_s
-                angvels.append(angvel)
-            else:
-                angvels.append(0.0)
+            assert dt_s > 0, "Time difference must be positive"
+            angvel = angle / dt_s
+            angvels.append(angvel)
         
         # 补齐长度
         angvels.append(angvels[-1] if angvels else 0.0)
         return np.array(angvels)
+
+    @staticmethod
+    def _smooth_series(values: np.ndarray, window_size: int = 51) -> np.ndarray:
+        """平滑序列，降低小波动对尖峰检测的影响。"""
+        if len(values) < 5:
+            return values
+        win = min(window_size, len(values) if len(values) % 2 == 1 else len(values) - 1)
+        win = max(win, 5)
+        try:
+            return signal.savgol_filter(values, window_length=win, polyorder=3)
+        except Exception:
+            return values
+
+    @staticmethod
+    def _high_motion_windows(
+        values: np.ndarray,
+        t_us: np.ndarray,
+        window_sec: float = 1.0,
+        high_motion_percentile: float = 70.0,
+    ) -> list[tuple[int, int, int, int]]:
+        """计算高运动段窗口，返回 (start_us, end_us, i0, i1) 列表。"""
+        if len(values) == 0:
+            return []
+
+        win_us = int(window_sec * 1e6)
+        global_thr = np.percentile(values, high_motion_percentile)
+        windows = []
+        idx = 0
+        n = len(values)
+        while idx < n:
+            t_start = int(t_us[idx])
+            t_end = t_start + win_us
+            j = idx
+            while j < n and t_us[j] <= t_end:
+                j += 1
+            segment = values[idx:j]
+            if len(segment) > 0 and np.max(segment) >= global_thr:
+                windows.append((t_start, int(t_us[j - 1]), idx, j))
+            idx = j
+
+        return windows
+
+    @staticmethod
+    def _detect_peaks_local(
+        values: np.ndarray,
+        t_us: np.ndarray,
+        motion_windows: list[tuple[int, int, int, int]],
+        top_percent: float = 5.0,
+        min_separation_ms: float = 20.0,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """仅在高运动段内，按局部窗口选 top% 原始尖峰。"""
+        if len(values) == 0 or len(motion_windows) == 0:
+            return np.array([], dtype=np.int64), np.array([], dtype=np.int64)
+
+        dt_us = np.median(np.diff(t_us)) if len(t_us) > 1 else 1000
+        min_sep_us = int(min_separation_ms * 1000.0)
+        distance = max(int(min_sep_us / max(dt_us, 1)), 1)
+
+        peaks_all = []
+        for _, _, i0, i1 in motion_windows:
+            segment = values[i0:i1]
+            if len(segment) == 0:
+                continue
+            local_thr = np.percentile(segment, 100.0 - top_percent)
+            seg_peaks, _ = signal.find_peaks(segment, height=local_thr, distance=distance)
+            if len(seg_peaks) > 0:
+                peaks_all.extend((i0 + seg_peaks).tolist())
+
+        if len(peaks_all) == 0:
+            return np.array([], dtype=np.int64), np.array([], dtype=np.int64)
+
+        peaks = np.array(sorted(set(peaks_all)), dtype=np.int64)
+        return t_us[peaks], peaks
+
+    @staticmethod
+    def _intersect_windows(
+        w1: list[tuple[int, int, int, int]],
+        w2: list[tuple[int, int, int, int]],
+    ) -> list[tuple[int, int]]:
+        """两组时间窗口取交集，返回 (start_us, end_us) 列表。"""
+        if not w1 or not w2:
+            return []
+        i = j = 0
+        res = []
+        w1_sorted = sorted([(a, b) for a, b, _, _ in w1])
+        w2_sorted = sorted([(a, b) for a, b, _, _ in w2])
+        while i < len(w1_sorted) and j < len(w2_sorted):
+            a1, b1 = w1_sorted[i]
+            a2, b2 = w2_sorted[j]
+            start = max(a1, a2)
+            end = min(b1, b2)
+            if start < end:
+                res.append((start, end))
+            if b1 < b2:
+                i += 1
+            else:
+                j += 1
+        return res
+
+    @staticmethod
+    def _match_peak_times(
+        imu_peak_t_us: np.ndarray,
+        gt_peak_t_us: np.ndarray,
+        match_window_ms: float = 20.0,
+    ) -> tuple[float, float]:
+        """计算尖峰对齐率（IMU->GT 与 GT->IMU）。"""
+        if len(imu_peak_t_us) == 0 or len(gt_peak_t_us) == 0:
+            return 0.0, 0.0
+        window_us = int(match_window_ms * 1000.0)
+
+        def _match_rate(src, dst):
+            matched = 0
+            for t in src:
+                idx = np.searchsorted(dst, t)
+                candidates = []
+                if idx > 0:
+                    candidates.append(abs(int(t) - int(dst[idx - 1])))
+                if idx < len(dst):
+                    candidates.append(abs(int(t) - int(dst[idx])))
+                if candidates and min(candidates) <= window_us:
+                    matched += 1
+            return matched / max(len(src), 1)
+
+        return _match_rate(imu_peak_t_us, gt_peak_t_us), _match_rate(gt_peak_t_us, imu_peak_t_us)
+
+    @staticmethod
+    def _peak_cross_correlation(
+        imu_peak_t_us: np.ndarray,
+        gt_peak_t_us: np.ndarray,
+        overlap_start_us: int,
+        overlap_end_us: int,
+        target_rate_hz: float,
+        motion_windows: list[tuple[int, int]] | None = None,
+    ) -> tuple[float, float]:
+        """基于尖峰序列的互相关，返回最大相关值与对应滞后(ms)。仅在高运动段内计算。"""
+        if len(imu_peak_t_us) == 0 or len(gt_peak_t_us) == 0:
+            return 0.0, 0.0
+        dt_s = 1.0 / max(target_rate_hz, 1.0)
+        step_us = int(dt_s * 1e6)
+        if step_us <= 0:
+            step_us = 5000
+
+        n = int((overlap_end_us - overlap_start_us) // step_us) + 1
+        if n <= 1:
+            return 0.0, 0.0
+
+        imu_series = np.zeros(n, dtype=np.float32)
+        gt_series = np.zeros(n, dtype=np.float32)
+        mask = np.zeros(n, dtype=bool)
+
+        def _fill(series, peak_t_us):
+            idx = ((peak_t_us - overlap_start_us) // step_us).astype(np.int64)
+            idx = idx[(idx >= 0) & (idx < n)]
+            series[idx] = 1.0
+
+        _fill(imu_series, imu_peak_t_us)
+        _fill(gt_series, gt_peak_t_us)
+
+        if motion_windows:
+            for start_us, end_us in motion_windows:
+                i0 = int((start_us - overlap_start_us) // step_us)
+                i1 = int((end_us - overlap_start_us) // step_us) + 1
+                i0 = max(i0, 0)
+                i1 = min(i1, n)
+                if i0 < i1:
+                    mask[i0:i1] = True
+            imu_series = imu_series * mask
+            gt_series = gt_series * mask
+
+        corr = np.correlate(imu_series, gt_series, mode="full")
+        if len(corr) == 0:
+            return 0.0, 0.0
+        max_idx = int(np.argmax(corr))
+        lag_samples = max_idx - (n - 1)
+        lag_ms = lag_samples * dt_s * 1000.0
+        peak_corr = float(np.max(corr) / max(np.sum(gt_series), 1.0))
+        return peak_corr, lag_ms
     
     @staticmethod
     def plot_time_alignment(gt_poses: PosesData, imu_data: ImuData, 
@@ -340,6 +562,58 @@ class TimeSyncDiagnosis:
         plt.close()
         print(f"时间对齐图已保存: {output_path}")
 
+    @staticmethod
+    def plot_alignment_before_after(
+        gt_poses: PosesData,
+        imu_data: ImuData,
+        lag_ms: float,
+        output_path: Path,
+    ):
+        """Plot before/after alignment using the estimated lag (IMU as reference)."""
+        # Build common time axis
+        gt_angvel = TimeSyncDiagnosis._compute_angular_velocity(gt_poses.rots, gt_poses.t_us)
+        imu_angvel = np.linalg.norm(imu_data.gyro, axis=1)
+
+        t_start = max(gt_poses.t_us[0], imu_data.t_us[0])
+        t_end = min(gt_poses.t_us[-1], imu_data.t_us[-1])
+        if t_end <= t_start:
+            return
+
+        n_samples = min(len(gt_poses), len(imu_data)) // 2
+        n_samples = max(n_samples, 1000)
+        common_t_us = np.linspace(t_start, t_end, n_samples)
+
+        # Before: raw GT vs IMU
+        gt_before = np.interp(common_t_us, gt_poses.t_us, gt_angvel)
+        imu_ref = np.interp(common_t_us, imu_data.t_us, imu_angvel)
+
+        # After: shift GT by lag (IMU as reference)
+        lag_us = lag_ms * 1000.0
+        gt_after = np.interp(common_t_us - lag_us, gt_poses.t_us, gt_angvel, left=np.nan, right=np.nan)
+
+        fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+        t_s = (common_t_us - common_t_us[0]) * 1e-6
+
+        axes[0].plot(t_s, imu_ref, label="IMU Angular Velocity", alpha=0.7, linewidth=0.8)
+        axes[0].plot(t_s, gt_before, label="GT Angular Velocity (Before)", alpha=0.7, linewidth=0.8)
+        axes[0].set_ylabel("Angular Velocity (rad/s)")
+        axes[0].set_title("Before Alignment")
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+
+        axes[1].plot(t_s, imu_ref, label="IMU Angular Velocity", alpha=0.7, linewidth=0.8)
+        axes[1].plot(t_s, gt_after, label=f"GT Angular Velocity (After, shift {lag_ms:.1f} ms)", alpha=0.7, linewidth=0.8)
+        axes[1].set_xlabel("Time (s)")
+        axes[1].set_ylabel("Angular Velocity (rad/s)")
+        axes[1].set_title("After Alignment")
+        axes[1].legend()
+        axes[1].grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close()
+        print(f"对齐前后对比图已保存: {output_path}")
+
 
 class CoordinateTransformDiagnosis:
     """坐标系转换诊断"""
@@ -367,7 +641,7 @@ class CoordinateTransformDiagnosis:
         results = {}
         
         # Important: Transform IMU from body frame to global frame first
-        print("    > Transforming coordinates (Body Frame -> Global Frame)...")
+        print("    > 正在进行坐标系转换 (Body Frame -> Global Frame)...")
         imu_global = imu_data.transform(rots=gt_poses.rots)
         
         acce = imu_global.acce  # 转换后的加速度（全局坐标系）
@@ -398,26 +672,38 @@ class CoordinateTransformDiagnosis:
         gz_deviation = np.abs(np.mean(gz)) - ideal_gravity
         results["gravity_deviation_from_ideal"] = float(gz_deviation)
         
-        # 分析动态和静态状态
-        # 使用加速度幅度的变化来检测运动状态
-        acce_mag_filtered = signal.savgol_filter(acce_mag, window_length=min(101, len(acce_mag) if len(acce_mag) % 2 == 1 else len(acce_mag)-1), polyorder=3)
+        # 分析动态和静态状态（行人惯导：仅静止段应满足 XY≈0, Z≈9.81）
+        # 使用加速度幅度变化 + 陀螺仪幅度判定静止段
+        acce_mag_filtered = signal.savgol_filter(
+            acce_mag,
+            window_length=min(101, len(acce_mag) if len(acce_mag) % 2 == 1 else len(acce_mag) - 1),
+            polyorder=3,
+        )
         acce_mag_derivative = np.abs(np.gradient(acce_mag_filtered))
-        
-        # 找到静态段（导数小）
-        static_threshold = np.percentile(acce_mag_derivative, 25)
-        static_mask = acce_mag_derivative < static_threshold
-        
+        gyro_mag = np.linalg.norm(imu_global.gyro, axis=1)
+
+        acc_thr = np.percentile(acce_mag_derivative, 20)
+        gyro_thr = np.percentile(gyro_mag, 20)
+        static_mask = (acce_mag_derivative <= acc_thr) & (gyro_mag <= gyro_thr)
+        static_ratio = float(np.mean(static_mask)) if len(static_mask) > 0 else 0.0
+        results["static_ratio"] = static_ratio
+
         if np.sum(static_mask) > 10:
             static_acce = acce[static_mask]
             results["static_gz_mean"] = float(np.mean(static_acce[:, 2]))
             results["static_gz_std"] = float(np.std(static_acce[:, 2]))
             results["static_gxy_mean"] = float(np.mean(np.linalg.norm(static_acce[:, :2], axis=1)))
+        else:
+            # 静止段不足时，回退到全段指标
+            results["static_gz_mean"] = results["gz_mean"]
+            results["static_gz_std"] = results["gz_std"]
+            results["static_gxy_mean"] = results["gxy_mean"]
         
-        # 计算转换质量评分
+        # 计算转换质量评分（以静止段为主）
         # 评分标准：
         # 1. gravity_alignment_ratio 应该 > 0.9（重力集中在 Z 轴）
-        # 2. gz 应该接近 9.8（误差 < 1.0）
-        # 3. gxy 应该很小（< 1.0）
+        # 2. static_gz_mean 接近 9.8（误差 < 1.0）
+        # 3. static_gxy_mean 很小（< 1.0）
         
         score = 0.0
         if gravity_alignment_ratio > 0.95:
@@ -427,16 +713,17 @@ class CoordinateTransformDiagnosis:
         elif gravity_alignment_ratio > 0.70:
             score += 15
         
-        if abs(gz_deviation) < 0.5:
+        static_gz_dev = abs(results["static_gz_mean"] - 9.81)
+        if static_gz_dev < 0.5:
             score += 30
-        elif abs(gz_deviation) < 1.0:
+        elif static_gz_dev < 1.0:
             score += 20
-        elif abs(gz_deviation) < 2.0:
+        elif static_gz_dev < 2.0:
             score += 10
         
-        if results["gxy_mean"] < 0.5:
+        if results["static_gxy_mean"] < 0.5:
             score += 30
-        elif results["gxy_mean"] < 1.0:
+        elif results["static_gxy_mean"] < 1.0:
             score += 15
         
         results["coordinate_transform_score"] = score
@@ -454,7 +741,7 @@ class CoordinateTransformDiagnosis:
             output_path: 输出路径
         """
         # Important: Transform to global frame first
-        print("    > Transforming IMU data to global frame for visualization...")
+        print("    > 正在将 IMU 数据转换到全局坐标系用于可视化...")
         imu_global = imu_data.transform(rots=gt_poses.rots)
         acce = imu_global.acce  # 使用转换后的加速度
         
@@ -536,15 +823,25 @@ def diagnose_preprocessed_data(data_dir: Path, output_dir: Path = None) -> Diagn
     data_dir = Path(data_dir)
     output_dir = Path(output_dir)
     
-    # 查找 gt.csv 和 imu 文件
+    # 查找 gt.csv 和 imu 文件（优先使用 imu-c.csv）
     gt_csv = None
     imu_csv = None
+    imu_candidates = []
     
     for f in data_dir.glob("*.csv"):
         if f.name == "gt.csv":
             gt_csv = f
         elif "imu" in f.name.lower():
-            imu_csv = f
+            imu_candidates.append(f)
+
+    if imu_candidates:
+        imu_candidates_sorted = sorted(imu_candidates, key=lambda p: p.name)
+        for f in imu_candidates_sorted:
+            if f.name.lower() == "imu-c.csv":
+                imu_csv = f
+                break
+        if imu_csv is None:
+            imu_csv = imu_candidates_sorted[0]
     
     if gt_csv is None:
         raise FileNotFoundError(f"gt.csv not found in {data_dir}")
@@ -572,7 +869,7 @@ def diagnose_preprocessed_data(data_dir: Path, output_dir: Path = None) -> Diagn
     print("1. 时间同步诊断")
     print("   验证 PreprocessDBv5 两步法时间同步的质量")
     print("   （粗对齐 + 精对齐）")
-    print("   方法: 检查 IMU 与 GT 的运动相关性")
+    print("   方法: 以 IMU 为参考，检查 GT 尖峰是否对齐")
     print("="*80)
     
     time_sync_results = TimeSyncDiagnosis.analyze_time_alignment(gt_poses, imu_data)
@@ -584,19 +881,39 @@ def diagnose_preprocessed_data(data_dir: Path, output_dir: Path = None) -> Diagn
         else:
             print(f"  {key}: {value}")
     
-    # Check time sync quality
-    motion_corr = time_sync_results.get("motion_correlation", 0)
+    # Check time sync quality (peak-based)
+    peak_match_rate = time_sync_results.get("peak_match_rate_imu", 0.0)
+    peak_corr = time_sync_results.get("peak_correlation", 0.0)
+    peak_lag_ms = time_sync_results.get("peak_corr_lag_ms", 0.0)
     sync_quality = time_sync_results.get("sync_quality", "Unknown")
+    match_window_ms = time_sync_results.get("peak_match_window_ms", 20.0)
     
-    if sync_quality == "Poor" or motion_corr < 0.5:
-        report.add_warning(f"时间同步质量较差: 运动相关性仅 {motion_corr:.4f}（应大于 0.7）")
-    elif sync_quality == "Fair":
-        report.add_warning(f"时间同步质量一般: 运动相关性 {motion_corr:.4f}（建议 > 0.7）")
+    if sync_quality == "较差" or max(peak_match_rate, peak_corr) < 0.6:
+        report.add_warning(
+            f"时间同步质量较差: 尖峰对齐率 {peak_match_rate:.4f}（建议 > 0.6）"
+        )
+    elif sync_quality == "一般":
+        report.add_warning(
+            f"时间同步质量一般: 尖峰对齐率 {peak_match_rate:.4f}（建议 > 0.6）"
+        )
+    
+    if abs(peak_lag_ms) > match_window_ms:
+        report.add_warning(
+            f"尖峰相关滞后偏大: {peak_lag_ms:.1f} ms（应在 ±{match_window_ms:.0f} ms 内）"
+        )
     
     # 绘制时间对齐诊断图
     TimeSyncDiagnosis.plot_time_alignment(
         gt_poses, imu_data, 
         output_dir / "diagnosis_time_alignment.png"
+    )
+
+    # 绘制对齐前后对比图（使用尖峰互相关滞后）
+    TimeSyncDiagnosis.plot_alignment_before_after(
+        gt_poses,
+        imu_data,
+        time_sync_results.get("peak_corr_lag_ms", 0.0),
+        output_dir / "diagnosis_alignment_before_after.png",
     )
     
     # 2. Coordinate transformation diagnosis
@@ -617,15 +934,16 @@ def diagnose_preprocessed_data(data_dir: Path, output_dir: Path = None) -> Diagn
         else:
             print(f"  {key}: {value}")
     
-    # Check coordinate transformation quality
+    # Check coordinate transformation quality (static-window based)
     if transform_results["gravity_alignment_ratio"] < 0.85:
         report.add_warning(f"重力对齐比率偏低: {transform_results['gravity_alignment_ratio']:.4f} < 0.85")
     
-    if abs(transform_results["gravity_deviation_from_ideal"]) > 1.0:
-        report.add_warning(f"重力偏差较大: {transform_results['gravity_deviation_from_ideal']:.4f} m/s²")
+    static_gz_dev = abs(transform_results["static_gz_mean"] - 9.81)
+    if static_gz_dev > 1.0:
+        report.add_warning(f"静止段重力偏差较大: {static_gz_dev:.4f} m/s²")
     
-    if transform_results["gxy_mean"] > 1.0:
-        report.add_warning(f"水平重力分量较大: {transform_results['gxy_mean']:.4f} m/s²")
+    if transform_results["static_gxy_mean"] > 1.0:
+        report.add_warning(f"静止段水平重力分量较大: {transform_results['static_gxy_mean']:.4f} m/s²")
     
     # 绘制重力加速度分析图
     CoordinateTransformDiagnosis.plot_gravity_analysis(
@@ -640,18 +958,22 @@ def diagnose_preprocessed_data(data_dir: Path, output_dir: Path = None) -> Diagn
     
     time_sync_score = 100.0
     
-    # 时间同步得分（基于运动相关性）
-    motion_corr = time_sync_results.get("motion_correlation", 0)
-    if not np.isnan(motion_corr):
-        # 相关性 > 0.7 为优秀，> 0.5 为良好，> 0.3 为一般，否则为差
-        if motion_corr > 0.7:
+    # 时间同步得分（基于尖峰对齐，调整阈值）
+    peak_match_rate = time_sync_results.get("peak_match_rate_imu", 0.0)
+    peak_corr = time_sync_results.get("peak_correlation", 0.0)
+    peak_lag_ms = time_sync_results.get("peak_corr_lag_ms", 0.0)
+    peak_score_base = max(peak_match_rate, peak_corr)
+    if not np.isnan(peak_score_base):
+        if peak_score_base >= 0.6:
             time_sync_score = 95
-        elif motion_corr > 0.5:
+        elif peak_score_base >= 0.4:
             time_sync_score = 75
-        elif motion_corr > 0.3:
+        elif peak_score_base >= 0.2:
             time_sync_score = 50
         else:
             time_sync_score = 20
+    if abs(peak_lag_ms) > time_sync_results.get("peak_match_window_ms", 20.0):
+        time_sync_score -= 10
     
     # 时间异常得分
     anomaly_count = time_sync_results["gt_time_anomalies"] + time_sync_results["imu_time_anomalies"]
@@ -665,7 +987,7 @@ def diagnose_preprocessed_data(data_dir: Path, output_dir: Path = None) -> Diagn
     
     report.set_quality_score(overall_score)
     
-    print(f"\n  时间同步评分: {time_sync_score:.1f}/100 (运动相关性: {motion_corr:.4f})")
+    print(f"\n  时间同步评分: {time_sync_score:.1f}/100 (尖峰对齐率: {peak_match_rate:.4f})")
     print(f"  坐标系转换评分: {transform_score:.1f}/100")
     print(f"  总体质量评分: {overall_score:.1f}/100")
     
@@ -680,8 +1002,11 @@ def diagnose_preprocessed_data(data_dir: Path, output_dir: Path = None) -> Diagn
     if transform_results["gravity_alignment_ratio"] < 0.99:
         report.add_recommendation("检查 IMU 坐标系转换旋转矩阵（重力对齐度偏低）。")
     
-    if motion_corr < 0.7:
-        report.add_recommendation(f"改进时间同步（运动相关性 {motion_corr:.4f}，建议 > 0.7）。考虑调整 PreprocessDBv5.py 中的时间范围。")
+    if peak_match_rate < 0.8:
+        report.add_recommendation(
+            f"改进时间同步（以 IMU 为参考的尖峰对齐率 {peak_match_rate:.4f}，建议 > 0.6）。"
+            "考虑调整 PreprocessDBv5.py 中的时间范围。"
+        )
     
     # 保存诊断报告
     report.save("diagnosis_report.json")
@@ -711,23 +1036,34 @@ def main():
         """
     )
     parser.add_argument(
-        "-d", "--data-dir", 
-        type=str, 
-        required=True,
-        help="包含 gt.csv 和 imu*.csv 的数据目录"
+        "-u",
+        "--unit-dir",
+        type=str,
+        default=None,
+        help="单个数据单元目录（包含 gt.csv 和 imu*.csv）",
+    )
+    parser.add_argument(
+        "-d",
+        "--data-dir",
+        type=str,
+        default=None,
+        help="数据目录（包含 gt.csv 和 imu*.csv）",
     )
     parser.add_argument(
         "-o", "--output-dir",
         type=str,
         default=None,
-        help="输出目录（默认为数据目录）"
+        help="输出目录（默认为单元目录）"
     )
-    
     args = parser.parse_args()
     
     try:
+        data_dir = args.unit_dir or args.data_dir
+        if not data_dir:
+            parser.error("必须指定 -u/--unit-dir 或 -d/--data-dir")
+
         report = diagnose_preprocessed_data(
-            Path(args.data_dir),
+            Path(data_dir),
             Path(args.output_dir) if args.output_dir else None
         )
     except Exception as e:
