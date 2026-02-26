@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 """
 从数据库中读取IMU、cam数据并保存为imu.csv、cam.csv文件
+
+使用命令示例:
+  1) 单个数据库:
+      uv run python ReadImuCamFromDB.py --db data/xxx/xxx.db
+
+  2) 单个数据单元目录（只读取目录同名 .db）:
+      uv run python ReadImuCamFromDB.py -u data/20251031_101025_SM-G9900
+
+  3) 批量处理某上级目录下的所有单元:
+      uv run python ReadImuCamFromDB.py -d data
+
+  4) 扫描并处理全部数据库:
+      uv run python ReadImuCamFromDB.py --all --data-dir data
 """
 
 import sqlite3
