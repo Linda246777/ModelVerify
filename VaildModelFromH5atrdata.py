@@ -157,6 +157,34 @@ def _draw_metric_pde_by_group(
     plt.close()
 
 
+def _draw_metric_boxplot_by_group(
+    metric_by_group: dict[str, list[float]],
+    save_path: Path,
+    title: str,
+    y_label: str,
+) -> None:
+    valid_items = [(name, values) for name, values in metric_by_group.items() if len(values) > 0]
+    if len(valid_items) == 0:
+        return
+
+    labels = [it[0] for it in valid_items]
+    data = [np.asarray(it[1], dtype=np.float64) for it in valid_items]
+
+    plt.figure(figsize=(max(8, len(labels) * 1.2), 6))
+    try:
+        plt.boxplot(data, tick_labels=labels, showfliers=False)
+    except TypeError:
+        plt.boxplot(data, labels=labels, showfliers=False)
+    plt.ylabel(y_label)
+    plt.title(title)
+    plt.grid(True, alpha=0.3, axis="y")
+    plt.xticks(rotation=25, ha="right")
+    plt.tight_layout()
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+
+
 def _safe_name(name: str) -> str:
     return "".join(ch if (ch.isalnum() or ch in ["_", "-", "."]) else "_" for ch in name)
 
@@ -729,6 +757,12 @@ def main() -> None:
                     save_path=model_cross_dir / f"{metric_tag}_PDE_by_dataset.png",
                     title=f"{metric_key} PDE by Dataset - {model_name}",
                     x_label=metric_key,
+                )
+                _draw_metric_boxplot_by_group(
+                    metric_by_group=metric_by_dataset[metric_key],
+                    save_path=model_cross_dir / f"{metric_tag}_Boxplot_by_dataset.png",
+                    title=f"{metric_key} Boxplot by Dataset - {model_name}",
+                    y_label=metric_key,
                 )
             model_metric_overall[metric_key] = {
                 "overall": _get_err_stats(merged_values),
