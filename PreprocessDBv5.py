@@ -295,10 +295,11 @@ def time_sync(
     
     # 第二步：精对齐（小范围微调）
     print(f"\n=== 第二步：精对齐（小范围微调）===")
-    
-    # 创建一个临时的GT数据副本，应用粗对齐结果
+
+    # 注意：match21 内部会对每个输入序列分别减去自身起始时间，
+    # 因此其返回值是该次调用的“绝对时间偏移估计”，而不是相对上一轮的增量。
+    # 这里不再对 GT 预加粗对齐结果，避免重复累计。
     gt_data_fine = GroundTruthData(rtab_data.node_t_us, rtab_data.node_rots, rtab_data.node_ps)
-    gt_data_fine.t_us += coarse_time_gc
     
     # 在小范围内搜索相对偏移（支持指定或自动）
     if fine_range is None:
@@ -320,24 +321,23 @@ def time_sync(
     if output_dir:
         fine_save_path = output_dir / "TimeDiff2.png"
     
-    # 使用较高的分辨率搜索相对偏移
-    # 注意：这里搜索的是相对偏移，不是绝对偏移
+    # 使用较高的分辨率再次估计绝对时间偏移
     relative_offset = match21(imu_poses, gt_data_fine,
                             time_range=fine_range,
                             save_path=fine_save_path,
                             resolution=200)  # 较高分辨率
-    
-    # 最终时间偏移 = 粗对齐结果 + 相对偏移
-    fine_time_gc = coarse_time_gc + relative_offset
+
+    # 最终时间偏移直接取精对齐估计，避免与粗对齐重复累计
+    fine_time_gc = relative_offset
     
     print("=" * 60)
-    print(f"粗对齐结果: {coarse_time_gc / 1e6:.6f} 秒")
-    print(f"精对齐相对偏移: {relative_offset / 1e6:.6f} 秒")
+    print(f"粗对齐结果(绝对): {coarse_time_gc / 1e6:.6f} 秒")
+    print(f"精对齐结果(绝对): {relative_offset / 1e6:.6f} 秒")
+    print(f"两次估计差值: {(relative_offset - coarse_time_gc) / 1e6:.6f} 秒")
     print(f"最终时间偏移: {fine_time_gc / 1e6:.6f} 秒 ({fine_time_gc} μs)")
     
-    # 应用最终的时间偏移
+    # 应用最终的时间偏移；起点重置放到统一时间轴插值之后
     gt_data.t_us += fine_time_gc
-    gt_data.reset_start()
     
     print(f"\n时间同步完成（两步法）")
     print("=" * 80)
@@ -464,6 +464,22 @@ def process_unit_directory(
 
     return raw_gt, imu_data, opt_data, t_offset_us, gap_info
 
+
+def _raise_if_batch_failed(failed_dirs: list[Path], mode_name: str):
+    """批量模式结束后统一抛出失败目录。"""
+    if not failed_dirs:
+        return
+
+    failed_list = [str(p) for p in failed_dirs]
+    print(f"\n{mode_name}存在失败目录，共 {len(failed_list)} 个：")
+    for idx, failed_dir in enumerate(failed_list, 1):
+        print(f"  {idx}. {failed_dir}")
+
+    raise RuntimeError(
+        f"{mode_name}处理存在失败目录（{len(failed_list)}个）：\n"
+        + "\n".join(failed_list)
+    )
+
 def save_results(
     raw_gt: GroundTruthData,
     imu_data: ImuData,
@@ -518,7 +534,6 @@ def save_results(
     ts_us = [imu_data.t_us, raw_gt.t_us]
     if opt_data is not None:
         opt_data.t_us = opt_data.t_us + t_offset_us
-        opt_data.reset_start()
         ts_us.append(opt_data.t_us)
 
     t_new_us = get_time_series(ts_us)
@@ -713,6 +728,7 @@ def main():
         
         # 批量处理每个单元目录
         success_count = 0
+        failed_dirs: list[Path] = []
         for i, unit_dir in enumerate(unit_dirs, 1):
             print(f"\n{'='*60}")
             print(f"处理第 {i}/{len(unit_dirs)} 个单元目录: {unit_dir}")
@@ -749,6 +765,7 @@ def main():
             except Exception as e:
                 print(f"✗ 单元目录处理失败: {unit_dir}")
                 print(f"错误信息: {e}")
+                failed_dirs.append(unit_dir)
                 continue
         
         print(f"\n{'='*60}")
@@ -756,6 +773,7 @@ def main():
         print(f"成功: {success_count}/{len(unit_dirs)}")
         print(f"失败: {len(unit_dirs) - success_count}/{len(unit_dirs)}")
         print(f"{'='*60}")
+        _raise_if_batch_failed(failed_dirs, "组目录模式")
     
     # ========== 模式 3：项目目录模式 (-p) ==========
     elif args.project_dir:
@@ -774,6 +792,7 @@ def main():
         
         # 批量处理每个单元目录
         success_count = 0
+        failed_dirs: list[Path] = []
         for i, unit_dir in enumerate(unit_dirs, 1):
             print(f"\n{'='*60}")
             print(f"处理第 {i}/{len(unit_dirs)} 个单元目录: {unit_dir}")
@@ -810,6 +829,7 @@ def main():
             except Exception as e:
                 print(f"✗ 单元目录处理失败: {unit_dir}")
                 print(f"错误信息: {e}")
+                failed_dirs.append(unit_dir)
                 continue
         
         print(f"\n{'='*60}")
@@ -817,6 +837,7 @@ def main():
         print(f"成功: {success_count}/{len(unit_dirs)}")
         print(f"失败: {len(unit_dirs) - success_count}/{len(unit_dirs)}")
         print(f"{'='*60}")
+        _raise_if_batch_failed(failed_dirs, "项目目录模式")
     
     # ========== 模式 4：数据集目录模式 (-d) ==========
     elif args.dataset_dir:
@@ -835,6 +856,7 @@ def main():
         
         # 批量处理每个单元目录
         success_count = 0
+        failed_dirs: list[Path] = []
         for i, unit_dir in enumerate(unit_dirs, 1):
             print(f"\n{'='*60}")
             print(f"处理第 {i}/{len(unit_dirs)} 个单元目录: {unit_dir}")
@@ -871,6 +893,7 @@ def main():
             except Exception as e:
                 print(f"✗ 单元目录处理失败: {unit_dir}")
                 print(f"错误信息: {e}")
+                failed_dirs.append(unit_dir)
                 continue
         
         print(f"\n{'='*60}")
@@ -878,6 +901,7 @@ def main():
         print(f"成功: {success_count}/{len(unit_dirs)}")
         print(f"失败: {len(unit_dirs) - success_count}/{len(unit_dirs)}")
         print(f"{'='*60}")
+        _raise_if_batch_failed(failed_dirs, "数据集目录模式")
     
     # ========== 模式 5：兼容旧模式 ==========
     elif args.db and args.imu:

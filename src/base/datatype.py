@@ -518,7 +518,7 @@ class ImuData:
             AssertionError: 当数据列数少于12列时
         """
         assert raw.shape[1] >= 12, f"Invalid raw data shape: {raw.shape}"
-        t_us = raw[:, 0] + raw[:, 11][0] + -raw[:, 0][0]  # 修正时间到UTC+8
+        t_us = np.rint(raw[:, 0] + raw[:, 11][0] - raw[:, 0][0]).astype(np.int64)
         gyro = raw[:, 1:4]
         acce = raw[:, 4:7]
         ahrs = Rotation.from_quat(raw[:, 7:11], scalar_first=True)

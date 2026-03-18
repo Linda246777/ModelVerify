@@ -823,7 +823,7 @@ def diagnose_preprocessed_data(data_dir: Path, output_dir: Path = None) -> Diagn
     data_dir = Path(data_dir)
     output_dir = Path(output_dir)
     
-    # 查找 gt.csv 和 imu 文件（优先使用 imu-c.csv）
+    # 查找 gt.csv 和 imu 文件（优先使用 imu.csv）
     gt_csv = None
     imu_csv = None
     imu_candidates = []
@@ -923,33 +923,49 @@ def diagnose_preprocessed_data(data_dir: Path, output_dir: Path = None) -> Diagn
     print("   方法: 检查重力对齐（Z 轴应为 ~9.8 m/s²）")
     print("="*80)
     
-    transform_results = CoordinateTransformDiagnosis.analyze_gravity_alignment(
-        imu_data, gt_poses
-    )
-    
-    for key, value in transform_results.items():
-        report.add_transform_result(key, value)
-        if isinstance(value, float):
-            print(f"  {key}: {value:.6f}")
-        else:
-            print(f"  {key}: {value}")
-    
-    # Check coordinate transformation quality (static-window based)
-    if transform_results["gravity_alignment_ratio"] < 0.85:
-        report.add_warning(f"重力对齐比率偏低: {transform_results['gravity_alignment_ratio']:.4f} < 0.85")
-    
-    static_gz_dev = abs(transform_results["static_gz_mean"] - 9.81)
-    if static_gz_dev > 1.0:
-        report.add_warning(f"静止段重力偏差较大: {static_gz_dev:.4f} m/s²")
-    
-    if transform_results["static_gxy_mean"] > 1.0:
-        report.add_warning(f"静止段水平重力分量较大: {transform_results['static_gxy_mean']:.4f} m/s²")
-    
-    # 绘制重力加速度分析图
-    CoordinateTransformDiagnosis.plot_gravity_analysis(
-        imu_data, gt_poses,  # 传入 gt_poses 用于坐标系转换
-        output_dir / "diagnosis_gravity_analysis.png"
-    )
+    transform_skipped = False
+    transform_results = {}
+    try:
+        transform_results = CoordinateTransformDiagnosis.analyze_gravity_alignment(
+            imu_data, gt_poses
+        )
+
+        for key, value in transform_results.items():
+            report.add_transform_result(key, value)
+            if isinstance(value, float):
+                print(f"  {key}: {value:.6f}")
+            else:
+                print(f"  {key}: {value}")
+
+        # Check coordinate transformation quality (static-window based)
+        if transform_results["gravity_alignment_ratio"] < 0.85:
+            report.add_warning(f"重力对齐比率偏低: {transform_results['gravity_alignment_ratio']:.4f} < 0.85")
+
+        static_gz_dev = abs(transform_results["static_gz_mean"] - 9.81)
+        if static_gz_dev > 1.0:
+            report.add_warning(f"静止段重力偏差较大: {static_gz_dev:.4f} m/s²")
+
+        if transform_results["static_gxy_mean"] > 1.0:
+            report.add_warning(f"静止段水平重力分量较大: {transform_results['static_gxy_mean']:.4f} m/s²")
+
+        # 绘制重力加速度分析图
+        CoordinateTransformDiagnosis.plot_gravity_analysis(
+            imu_data, gt_poses,  # 传入 gt_poses 用于坐标系转换
+            output_dir / "diagnosis_gravity_analysis.png"
+        )
+    except Exception as e:
+        transform_skipped = True
+        skip_reason = str(e)
+        print(f"  [!] 坐标系转换诊断已跳过: {skip_reason}")
+        report.add_warning(f"坐标系转换诊断已跳过: {skip_reason}")
+        report.add_recommendation("若需启用坐标系转换诊断，请先对齐 GT 与 IMU 的采样点数量或时间轴。")
+        transform_results = {
+            "skipped": True,
+            "skip_reason": skip_reason,
+            "coordinate_transform_score": 0.0,
+        }
+        for key, value in transform_results.items():
+            report.add_transform_result(key, value)
     
     # 3. Overall quality score
     print("\n" + "="*80)
@@ -981,14 +997,20 @@ def diagnose_preprocessed_data(data_dir: Path, output_dir: Path = None) -> Diagn
         time_sync_score -= min(anomaly_count * 5, 25)
     
     transform_score = transform_results.get("coordinate_transform_score", 0)
-    
-    overall_score = (time_sync_score * 0.4 + transform_score * 0.6)
+
+    if transform_skipped:
+        overall_score = time_sync_score
+    else:
+        overall_score = (time_sync_score * 0.4 + transform_score * 0.6)
     overall_score = max(0.0, min(100.0, overall_score))
     
     report.set_quality_score(overall_score)
     
     print(f"\n  时间同步评分: {time_sync_score:.1f}/100 (尖峰对齐率: {peak_match_rate:.4f})")
-    print(f"  坐标系转换评分: {transform_score:.1f}/100")
+    if transform_skipped:
+        print("  坐标系转换评分: 跳过")
+    else:
+        print(f"  坐标系转换评分: {transform_score:.1f}/100")
     print(f"  总体质量评分: {overall_score:.1f}/100")
     
     # Generate recommendations
@@ -999,7 +1021,7 @@ def diagnose_preprocessed_data(data_dir: Path, output_dir: Path = None) -> Diagn
     else:
         report.add_recommendation("数据质量较差。建议重新预处理。")
     
-    if transform_results["gravity_alignment_ratio"] < 0.99:
+    if (not transform_skipped) and transform_results["gravity_alignment_ratio"] < 0.99:
         report.add_recommendation("检查 IMU 坐标系转换旋转矩阵（重力对齐度偏低）。")
     
     if peak_match_rate < 0.8:
