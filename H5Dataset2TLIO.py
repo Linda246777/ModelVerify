@@ -5,9 +5,11 @@
     output_dir/
     ├── sequence_001/
     │   ├── imu0_resampled.npy
+    │   ├── imu0_resampled.csv  (可选)
     │   └── imu0_resampled_description.json
     ├── sequence_002/
     │   ├── imu0_resampled.npy
+    │   ├── imu0_resampled.csv  (可选)
     │   └── imu0_resampled_description.json
     ├── train_list.txt  (可选)
     ├── val_list.txt    (可选)
@@ -23,6 +25,7 @@ TLIO npy 列定义:
 
 用法:
     uv run python H5Dataset2TLIO.py -i input.h5 -o /path/to/tlio_out --export_split_lists
+    uv run python H5Dataset2TLIO.py -i input.h5 -o /path/to/tlio_out --export_csv --float_decimals 6
 """
 
 from __future__ import annotations
@@ -70,6 +73,17 @@ def parse_args() -> argparse.Namespace:
         "--skip_invalid",
         action="store_true",
         help="遇到无可用数据的序列时跳过，而不是终止",
+    )
+    parser.add_argument(
+        "--float_decimals",
+        type=int,
+        default=6,
+        help="浮点列统一保留的小数位数（用于 CSV，且会量化写入 npy），默认 6",
+    )
+    parser.add_argument(
+        "--export_csv",
+        action="store_true",
+        help="在每个序列目录额外导出 imu0_resampled.csv（固定小数位）",
     )
     return parser.parse_args()
 
@@ -147,26 +161,68 @@ def _build_from_aligned(sequence: Sequence) -> np.ndarray:
 
 
 def sequence_to_tlio_array(sequence: Sequence, imu_sensor_index: int) -> np.ndarray:
-    if sequence.resampled is not None:
-        return _build_from_resampled(sequence, imu_sensor_index)
-
+    # 优先导出 aligned 数据
     if sequence.aligned is not None:
         return _build_from_aligned(sequence)
 
-    raise ValueError("序列既没有 resampled 也没有 aligned 数据")
+    # 如果没有 aligned，再导出 resampled
+    if sequence.resampled is not None:
+        return _build_from_resampled(sequence, imu_sensor_index)
+
+    raise ValueError("序列既没有 aligned 也没有 resampled 数据")
+
+
+def _quantize_tlio_array(tlio_data: np.ndarray, float_decimals: int) -> np.ndarray:
+    """统一浮点列小数位，时间列保持整数微秒语义。"""
+    if float_decimals < 0:
+        raise ValueError(f"float_decimals 不能为负数: {float_decimals}")
+
+    quantized = tlio_data.astype(np.float64, copy=True)
+    quantized[:, 0] = np.rint(quantized[:, 0])
+    if quantized.shape[1] > 1:
+        quantized[:, 1:] = np.round(quantized[:, 1:], decimals=float_decimals)
+    return quantized
+
+
+def _export_tlio_csv(tlio_data: np.ndarray, csv_path: Path, float_decimals: int) -> None:
+    """导出固定精度 CSV，便于表格工具稳定渲染。"""
+    header = (
+        "timestamp_sec,gyr_x,gyr_y,gyr_z,acc_x,acc_y,acc_z,"
+        "quat_x,quat_y,quat_z,quat_w,pos_x,pos_y,pos_z,vel_x,vel_y,vel_z"
+    )
+
+    timestamp_sec = tlio_data[:, 0:1] / 1e6
+    csv_data = np.column_stack([timestamp_sec, tlio_data[:, 1:]])
+
+    fmt = [f"%.{float_decimals}f"] * csv_data.shape[1]
+    np.savetxt(
+        csv_path,
+        csv_data,
+        delimiter=",",
+        header=header,
+        comments="",
+        fmt=fmt,
+    )
 
 
 def save_tlio_sequence(
     sequence: Sequence,
     output_dir: Path,
     imu_sensor_index: int,
+    float_decimals: int,
+    export_csv: bool,
 ) -> int:
     seq_dir = output_dir / sequence.name
     seq_dir.mkdir(parents=True, exist_ok=True)
 
     tlio_data = sequence_to_tlio_array(sequence, imu_sensor_index)
+    tlio_data = _quantize_tlio_array(tlio_data, float_decimals)
     npy_path = seq_dir / "imu0_resampled.npy"
-    np.save(npy_path, tlio_data.astype(np.float64, copy=False))
+    np.save(npy_path, tlio_data)
+
+    if export_csv:
+        csv_path = seq_dir / "imu0_resampled.csv"
+        _export_tlio_csv(tlio_data, csv_path, float_decimals)
 
     t_us = tlio_data[:, 0]
     frequency_hz = _safe_frequency_hz(t_us, sequence.attributes.frequency_hz)
@@ -214,6 +270,9 @@ def main() -> None:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.float_decimals < 0:
+        raise ValueError("--float_decimals 必须 >= 0")
+
     if not input_h5.exists():
         raise FileNotFoundError(f"输入 H5 文件不存在: {input_h5}")
 
@@ -237,6 +296,8 @@ def main() -> None:
                     sequence=sequence,
                     output_dir=output_dir,
                     imu_sensor_index=args.imu_sensor_index,
+                    float_decimals=args.float_decimals,
+                    export_csv=args.export_csv,
                 )
                 ok_count += 1
                 total_rows += row_count

@@ -483,6 +483,7 @@ class DataRunner:
         time_range: tuple[float | None, float | None] = (None, None),
         has_init_rerun: bool = False,
         using_gt: bool = True,
+        visual: bool = True,
     ):
         self.ud = ud
         self.using_gt = using_gt
@@ -502,7 +503,7 @@ class DataRunner:
         world_imu_gt = self.imu_data.transform(self.gt_data.rots if using_gt else None)
         self.in_data = Data(world_imu_gt)
 
-        if not has_init_rerun and self.in_data.using_rerun:
+        if visual and not has_init_rerun and self.in_data.using_rerun:
             # rre.rerun_init(ud.name, imu_view_tags=["GT", "Raw"])
             rre.RerunView().add_imu_view(
                 tags=["GT", "Raw"],

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """从 H5 数据集做模型验证并输出完整评估结果。
 
+
 支持：
-- 单模型/多模型同轮验证
+- 单模型/多模型同轮验证多h5个数据集
 - 每个样本轨迹图（GT vs Pred）与多模型轨迹对比
 - 位置 RMSE、速度 RMSE、航向误差（deg）、ATE/RTE（含 APE/RPE）
 - 模型级 CDF、数据集级汇总、多模型 CDF 对比
@@ -36,6 +37,144 @@ from base.model import DataRunner, InertialNetworkData, ModelLoader, NetworkResu
 from base.obj import Obj
 from base.utils import angle_between_vectors, angle_with_x_axis
 
+def evaluate_from_unitdata(unitdata_list, nets, data_cfg, output_dir, no_plots, max_samples=None):
+    """
+    入口函数：支持直接传入UnitData列表进行评估，兼容TLIO格式。
+    参数：
+        unitdata_list: List[UnitData]，每个单元的数据
+        nets: 模型列表
+        data_cfg: InertialNetworkData配置
+        output_dir: 输出目录（Path对象）
+        no_plots: 是否跳过绘图
+        max_samples: 最大样本数（用于测试，None表示使用全部数据）
+    """
+    import numpy as np
+    from tqdm import tqdm
+    from base.datatype import ImuData, PosesData
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model_error_pool = {n.name: [] for n in nets}
+    model_unit_metrics = {n.name: [] for n in nets}
+    model_heading_pool = {n.name: {"angle": [], "error": []} for n in nets}
+    print(f"[DEBUG] 开始处理 {len(unitdata_list)} 个单元", flush=True)
+    for idx, ud in enumerate(unitdata_list, start=1):
+        print(f"[DEBUG] 处理单元 {idx}/{len(unitdata_list)}: {ud.name}", flush=True)
+        
+        # 如果指定了最大样本数，截取数据
+        if max_samples is not None and ud.imu_data is not None:
+            import copy
+            ud_copy = copy.copy(ud)
+            if len(ud_copy.imu_data.t_us) > max_samples:
+                print(f"[DEBUG] 截取数据到前 {max_samples} 个样本", flush=True)
+                # 截取 IMU 数据
+                t_us = ud_copy.imu_data.t_us[:max_samples]
+                gyro = ud_copy.imu_data.gyro[:max_samples]
+                acce = ud_copy.imu_data.acce[:max_samples]
+                ahrs = ud_copy.imu_data.ahrs[:max_samples]
+                mag = ud_copy.imu_data.magn[:max_samples] if ud_copy.imu_data.magn is not None else np.zeros_like(acce)
+                ud_copy.imu_data = ImuData(t_us, gyro, acce, ahrs, mag, frame=ud_copy.imu_data.frame)
+                
+                # 截取 GT 数据
+                if ud_copy.gt_data is not None:
+                    gt_t_us = ud_copy.gt_data.t_us[:max_samples]
+                    gt_rots = ud_copy.gt_data.rots[:max_samples]
+                    gt_ps = ud_copy.gt_data.ps[:max_samples]
+                    ud_copy.gt_data = PosesData(gt_t_us, gt_rots, gt_ps)
+            ud = ud_copy
+        
+        out_unit_root = output_dir / "units" / Path(ud.name).name
+        out_unit_root.mkdir(parents=True, exist_ok=True)
+        print(f"[DEBUG] 创建输出目录: {out_unit_root}", flush=True)
+        # 完全禁用Rerun
+        data_cfg_no_rerun = data_cfg.no_rerun()
+        dr = DataRunner(ud, data_cfg_no_rerun, has_init_rerun=False, visual=False)
+        print(f"[DEBUG] 开始推理...", flush=True)
+        nr_list = dr.predict_batch(nets)
+        print(f"[DEBUG] 推理完成，得到 {len(nr_list)} 个结果", flush=True)
+        unit_pred_poses = []
+        unit_labels = []
+        for net, nr in zip(nets, nr_list):
+            try:
+                from base.evaluate import Evaluation
+                eva = Evaluation(ud.gt_data)
+                eval_json, eval_inner = eva.get_eval(nr.poses, net.name)
+                unit_model_dir = out_unit_root / net.name
+                unit_model_dir.mkdir(parents=True, exist_ok=True)
+                if not no_plots:
+                    try:
+                        plot_one_cdf(eval_inner["ATE_CDF"], unit_model_dir / "CDF.png", show=False)
+                        draw_trajectory_2d_compare(
+                            [nr.poses, ud.gt_data],
+                            labels=[net.name, "GT"],
+                            title=f"Trajectory_{net.name}_{ud.name}",
+                            save_path=unit_model_dir / "Trajectory.png",
+                            show=False,
+                        )
+                        if len(nr.eval_t_list) > 0:
+                            Bar(
+                                x=None,
+                                y=nr.eval_t_list,
+                                x_label="x",
+                                y_label="Time(s)",
+                                title=f"Inference Latency with {nr.network_device_name}",
+                            ).save(unit_model_dir)
+                    except Exception as e:
+                        print(f"[WARN] 绘图失败: {e}", flush=True)
+                unit_metrics = {
+                    "ATE(m)": eval_json.get("ATE(m)", 0.0),
+                    "trajectory_mean_error_ATE(m)": eval_json.get("ATE(m)", 0.0),
+                }
+                _save_json(unit_model_dir / "Metrics.json", unit_metrics)
+                model_error_pool[net.name].extend(eval_inner["ATE_CDF"]["errors"].tolist())
+                model_unit_metrics[net.name].append(unit_metrics)
+                unit_pred_poses.append(nr.poses)
+                unit_labels.append(net.name)
+            except Exception as e:
+                print(f"[ERROR] 评估模型 {net.name} 失败: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
+        if len(unit_pred_poses) > 1 and not no_plots:
+            draw_trajectory_2d_compare(
+                [ud.gt_data] + unit_pred_poses,
+                labels=["GT"] + unit_labels,
+                title=f"Trajectory_Compare_{Path(ud.name).name}",
+                save_path=out_unit_root / "Trajectory_Compare.png",
+                show=False,
+            )
+        if hasattr(dr, 'cleanup'):
+            dr.cleanup()
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        import matplotlib.pyplot as plt
+        plt.close('all')
+    compare_summary = {
+        "unit_count": len(unitdata_list),
+        "model_count": len(nets),
+        "models": [n.name for n in nets],
+        "model_errors": {k: v for k, v in model_error_pool.items()},
+        "per_unit_metrics": model_unit_metrics,
+    }
+    if not no_plots:
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(8, 6))
+        for name, errors in model_error_pool.items():
+            if len(errors) == 0:
+                continue
+            arr = np.sort(np.asarray(errors, dtype=np.float64))
+            cdf = np.arange(1, len(arr) + 1, dtype=np.float64) / len(arr)
+            plt.plot(arr, cdf, label=name)
+        plt.xlabel("ATE (m)")
+        plt.ylabel("CDF")
+        plt.title("Model ATE CDF Comparison")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        (output_dir / "compare").mkdir(parents=True, exist_ok=True)
+        plt.savefig(output_dir / "compare" / "ATE_CDF_Compare.png", dpi=150)
+        plt.close()
+    _save_json(output_dir / "CompareSummary.json", compare_summary)
+    print(f"全部评估结果已保存到 {output_dir / 'CompareSummary.json'}", flush=True)
 
 def _to_float(value: Any, default: float = 0.0) -> float:
     try:
